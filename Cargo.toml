@@ -1,9 +1,28 @@
 [package]
-name = "lora_ws_logger"
-version = "0.1.0"
+name = "loriot-websocket-mcp"
+version = "0.2.0"
 edition = "2021"
+description = "Real-time LoRaWAN sensor monitoring with MCP server capabilities"
+license = "MIT"
+repository = "https://github.com/avrabe/loriot-websocket-mcp"
+keywords = ["lorawan", "iot", "sensors", "mcp", "tui"]
+categories = ["command-line-utilities", "network-programming"]
+
+[[bin]]
+name = "loriot-monitor"
+path = "src/bin/loriot-monitor.rs"
+
+# Commented out until modules are fully extracted
+# [[bin]]
+# name = "loriot-tui"
+# path = "src/bin/tui.rs"
+
+# [[bin]]
+# name = "loriot-mcp"
+# path = "src/bin/mcp.rs"
 
 [dependencies]
+clap = { version = "4.0", features = ["derive"] }
 tokio = { version = "1", features = ["full"] }
 tokio-tungstenite = { version = "0.27", features = ["rustls-tls-webpki-roots"] }
 futures = "0.3"
@@ -16,3 +35,4 @@ chrono = "0.4"
 ratatui = "0.28"
 crossterm = "0.28"
 fxhash = "0.2"
+thiserror = "1.0"
