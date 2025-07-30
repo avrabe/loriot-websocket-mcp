@@ -16,5 +16,9 @@ Thumbs.db
 # Local configuration
 devices.json
 
+# Data storage
+sensor_history.jsonl
+sensor_history.jsonl.*
+
 # Logs
 *.log

@@ -15,16 +15,18 @@ use ratatui::{
     },
     Frame, Terminal,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     env,
     error::Error,
-    io,
+    io::{self, BufRead, Write},
+    path::Path,
     time::Duration,
 };
 use tokio::sync::mpsc;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
+use fxhash::{FxHashMap, FxHashSet};
 
 #[derive(Debug, Deserialize, Clone)]
 struct LoriotPayload {
@@ -35,6 +37,51 @@ struct LoriotPayload {
     ts: u64,
     #[serde(default)]
     name: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+struct StoredReading {
+    // Loriot WebSocket format fields (raw data)
+    cmd: String,
+    eui: String,
+    data: String,
+    ts: u64,
+    name: Option<String>,
+    
+    // Parsed fields (for faster loading)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    parsed_temperature: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    parsed_humidity: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    parsed_battery_voltage: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    parsed_battery_status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    parsed_activity: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    parsed_movement_count: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    parsed_lux: Option<u16>,
+}
+
+#[derive(Clone, Debug)]
+struct StorageConfig {
+    file_path: String,
+    memory_limit_readings: usize,
+    backup_count: usize,
+    sync_interval_minutes: usize,
+}
+
+impl Default for StorageConfig {
+    fn default() -> Self {
+        StorageConfig {
+            file_path: "sensor_history.jsonl".to_string(),
+            memory_limit_readings: 2000,
+            backup_count: 3,
+            sync_interval_minutes: 60,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -87,8 +134,201 @@ struct SensorReading {
     lux: Option<u16>,
 }
 
+struct StorageManager {
+    config: StorageConfig,
+    memory_cache: Vec<SensorReading>,
+    duplicate_tracker: FxHashSet<(u64, String)>, // (timestamp, device_eui)
+    device_latest_timestamps: FxHashMap<String, u64>,
+    total_stored_count: usize,
+    file_handle: Option<std::fs::File>,
+}
+
+impl StorageManager {
+    fn new(config: StorageConfig) -> Self {
+        StorageManager {
+            config,
+            memory_cache: Vec::new(),
+            duplicate_tracker: FxHashSet::default(),
+            device_latest_timestamps: FxHashMap::default(),
+            total_stored_count: 0,
+            file_handle: None,
+        }
+    }
+
+    async fn initialize(&mut self, device_names: &HashMap<String, String>) -> Result<(), Box<dyn Error + Send + Sync>> {
+        // Load existing data from file
+        self.load_existing_data(device_names).await?;
+        
+        // Open file for appending
+        self.file_handle = Some(std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.config.file_path)?);
+        
+        Ok(())
+    }
+
+    async fn load_existing_data(&mut self, device_names: &HashMap<String, String>) -> Result<(), Box<dyn Error + Send + Sync>> {
+        if !Path::new(&self.config.file_path).exists() {
+            return Ok(());
+        }
+
+        let file = std::fs::File::open(&self.config.file_path)?;
+        let reader = std::io::BufReader::new(file);
+        
+        let mut all_readings = Vec::new();
+        
+        for line in reader.lines() {
+            let line = line?;
+            if line.trim().is_empty() {
+                continue;
+            }
+            
+            match serde_json::from_str::<StoredReading>(&line) {
+                Ok(stored_reading) => {
+                    if let Some(sensor_reading) = self.stored_to_sensor_reading(&stored_reading, device_names) {
+                        all_readings.push(sensor_reading);
+                        self.duplicate_tracker.insert((stored_reading.ts, stored_reading.eui.clone()));
+                        self.device_latest_timestamps.insert(
+                            stored_reading.eui.clone(),
+                            stored_reading.ts.max(*self.device_latest_timestamps.get(&stored_reading.eui).unwrap_or(&0))
+                        );
+                        self.total_stored_count += 1;
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Warning: Failed to parse line in storage file: {}", e);
+                    continue;
+                }
+            }
+        }
+
+        // Sort by timestamp and keep most recent readings in memory
+        all_readings.sort_by_key(|r| r.timestamp);
+        
+        // Keep only the most recent readings in memory cache
+        if all_readings.len() > self.config.memory_limit_readings {
+            let start_index = all_readings.len() - self.config.memory_limit_readings;
+            self.memory_cache = all_readings.into_iter().skip(start_index).collect();
+        } else {
+            self.memory_cache = all_readings;
+        }
+
+        println!("Loaded {} readings from storage ({} in memory cache)", 
+                self.total_stored_count, self.memory_cache.len());
+        
+        Ok(())
+    }
+
+    fn stored_to_sensor_reading(&self, stored: &StoredReading, device_names: &HashMap<String, String>) -> Option<SensorReading> {
+        // Try to use parsed fields first, fall back to parsing raw data
+        if let (Some(temp), Some(hum), Some(bat_v), Some(bat_s), Some(act), Some(mov)) = (
+            stored.parsed_temperature,
+            stored.parsed_humidity,
+            stored.parsed_battery_voltage,
+            stored.parsed_battery_status.as_ref(),
+            stored.parsed_activity,
+            stored.parsed_movement_count
+        ) {
+            Some(SensorReading {
+                timestamp: stored.ts,
+                device_eui: stored.eui.clone(),
+                device_name: device_names.get(&stored.eui).cloned().unwrap_or_else(|| stored.eui.clone()),
+                temperature: temp,
+                humidity: hum,
+                battery_voltage: bat_v,
+                battery_status: bat_s.clone(),
+                activity: act,
+                movement_count: mov,
+                lux: stored.parsed_lux,
+            })
+        } else {
+            // Fall back to parsing raw data
+            if let Some((bat_v, bat_s, temp, hum, activity, movement_count, lux, _)) = decode_lht65s_pir(&stored.data) {
+                Some(SensorReading {
+                    timestamp: stored.ts,
+                    device_eui: stored.eui.clone(),
+                    device_name: device_names.get(&stored.eui).cloned().unwrap_or_else(|| stored.eui.clone()),
+                    temperature: temp,
+                    humidity: hum,
+                    battery_voltage: bat_v,
+                    battery_status: bat_s,
+                    activity,
+                    movement_count,
+                    lux,
+                })
+            } else {
+                None
+            }
+        }
+    }
+
+    fn add_reading(&mut self, reading: SensorReading) -> Result<bool, Box<dyn Error + Send + Sync>> {
+        let key = (reading.timestamp, reading.device_eui.clone());
+        
+        // Check for duplicates
+        if self.duplicate_tracker.contains(&key) {
+            return Ok(false); // Duplicate, not added
+        }
+
+        // Create stored reading with parsed fields
+        let stored_reading = StoredReading {
+            cmd: "rx".to_string(), // Default command
+            eui: reading.device_eui.clone(),
+            data: "".to_string(), // We'll need the raw data if we want to store it
+            ts: reading.timestamp,
+            name: None,
+            parsed_temperature: Some(reading.temperature),
+            parsed_humidity: Some(reading.humidity),
+            parsed_battery_voltage: Some(reading.battery_voltage),
+            parsed_battery_status: Some(reading.battery_status.clone()),
+            parsed_activity: Some(reading.activity),
+            parsed_movement_count: Some(reading.movement_count),
+            parsed_lux: reading.lux,
+        };
+
+        // Write to file
+        if let Some(ref mut file) = self.file_handle {
+            let line = serde_json::to_string(&stored_reading)?;
+            writeln!(file, "{}", line)?;
+            file.flush()?;
+        }
+
+        // Add to memory cache
+        let insert_pos = self.memory_cache
+            .binary_search_by_key(&reading.timestamp, |r| r.timestamp)
+            .unwrap_or_else(|pos| pos);
+        
+        self.memory_cache.insert(insert_pos, reading);
+        
+        // Maintain memory limit
+        if self.memory_cache.len() > self.config.memory_limit_readings {
+            self.memory_cache.remove(0);
+        }
+
+        // Update tracking
+        self.duplicate_tracker.insert(key);
+        self.device_latest_timestamps.insert(stored_reading.eui.clone(), stored_reading.ts);
+        self.total_stored_count += 1;
+
+        Ok(true) // Successfully added
+    }
+
+    fn get_readings(&self) -> &Vec<SensorReading> {
+        &self.memory_cache
+    }
+
+    fn get_total_count(&self) -> usize {
+        self.total_stored_count
+    }
+
+    fn get_memory_count(&self) -> usize {
+        self.memory_cache.len()
+    }
+}
+
 struct App {
-    readings: Vec<SensorReading>,
+    storage_manager: StorageManager,
     table_state: TableState,
     device_list_state: ListState,
     should_quit: bool,
@@ -102,7 +342,7 @@ struct App {
 impl Default for App {
     fn default() -> Self {
         App {
-            readings: Vec::new(),
+            storage_manager: StorageManager::new(StorageConfig::default()),
             table_state: TableState::default(),
             device_list_state: ListState::default(),
             should_quit: false,
@@ -117,7 +357,7 @@ impl Default for App {
 
 impl App {
     fn get_unique_devices(&self) -> Vec<String> {
-        let mut devices: Vec<String> = self.readings
+        let mut devices: Vec<String> = self.storage_manager.get_readings()
             .iter()
             .map(|r| r.device_name.clone())
             .collect::<std::collections::HashSet<_>>()
@@ -131,9 +371,9 @@ impl App {
         let time_cutoff = self.time_window.get_cutoff_timestamp();
         
         let time_filtered: Vec<&SensorReading> = if let Some(cutoff) = time_cutoff {
-            self.readings.iter().filter(|r| r.timestamp >= cutoff).collect()
+            self.storage_manager.get_readings().iter().filter(|r| r.timestamp >= cutoff).collect()
         } else {
-            self.readings.iter().collect()
+            self.storage_manager.get_readings().iter().collect()
         };
         
         if self.show_all_devices || self.selected_device.is_none() {
@@ -147,14 +387,14 @@ impl App {
     }
 
     fn get_pir_events(&self) -> Vec<&SensorReading> {
-        self.readings
+        self.storage_manager.get_readings()
             .iter()
             .filter(|r| r.activity)
             .collect()
     }
 
     fn get_next_packet_info(&self, device_eui: &str) -> Option<(u64, String)> {
-        let device_readings: Vec<_> = self.readings
+        let device_readings: Vec<_> = self.storage_manager.get_readings()
             .iter()
             .filter(|r| r.device_eui == device_eui)
             .collect();
@@ -225,24 +465,13 @@ impl App {
         app
     }
 
+    async fn initialize_storage(&mut self) -> Result<(), Box<dyn Error + Send + Sync>> {
+        self.storage_manager.initialize(&self.device_names).await
+    }
+
     fn add_reading(&mut self, reading: SensorReading) {
-        // Check if we already have a reading with the same timestamp and device
-        let duplicate_exists = self.readings.iter().any(|r| 
-            r.timestamp == reading.timestamp && r.device_eui == reading.device_eui
-        );
-        
-        if !duplicate_exists {
-            // Find the correct position to insert (maintain chronological order)
-            let insert_pos = self.readings
-                .binary_search_by_key(&reading.timestamp, |r| r.timestamp)
-                .unwrap_or_else(|pos| pos);
-            
-            self.readings.insert(insert_pos, reading);
-            
-            // Keep only last 1000 readings
-            if self.readings.len() > 1000 {
-                self.readings.remove(0);
-            }
+        if let Err(e) = self.storage_manager.add_reading(reading) {
+            eprintln!("Error storing reading: {}", e);
         }
     }
 
@@ -253,7 +482,7 @@ impl App {
     fn next(&mut self) {
         let i = match self.table_state.selected() {
             Some(i) => {
-                if i >= self.readings.len().saturating_sub(1) {
+                if i >= self.storage_manager.get_memory_count().saturating_sub(1) {
                     0
                 } else {
                     i + 1
@@ -268,7 +497,7 @@ impl App {
         let i = match self.table_state.selected() {
             Some(i) => {
                 if i == 0 {
-                    self.readings.len().saturating_sub(1)
+                    self.storage_manager.get_memory_count().saturating_sub(1)
                 } else {
                     i - 1
                 }
@@ -429,10 +658,15 @@ fn ui(f: &mut Frame, app: &App) {
         app.selected_device.as_ref().unwrap_or(&"None".to_string()).clone()
     };
     
+    let storage_info = format!("({}/{} readings)", 
+        app.storage_manager.get_memory_count(), 
+        app.storage_manager.get_total_count());
+    
     let help_text = format!(
-        "Device: {} | Time: {} | q:quit | Tab:views | ↑↓:navigate | Space:select | +/-:time | c:devices",
+        "Device: {} | Time: {} | Storage: {} | q:quit | Tab:views | ↑↓:navigate | +/-:time | c:devices",
         current_filter,
-        app.time_window.display_name()
+        app.time_window.display_name(),
+        storage_info
     );
     let help = Paragraph::new(help_text)
         .style(Style::default().fg(Color::Gray))
@@ -621,9 +855,9 @@ fn render_pir_events_tab(f: &mut Frame, area: ratatui::layout::Rect, app: &App) 
         .split(main_chunks[0]);
 
     // Show all PIR sensor readings (not just active motion events)
-    let pir_readings: Vec<_> = app.readings
+    let pir_readings: Vec<_> = app.storage_manager.get_readings()
         .iter()
-        .filter(|r| r.movement_count > 0 || app.readings.iter().any(|x| x.device_eui == r.device_eui && x.movement_count > 0))
+        .filter(|r| r.movement_count > 0 || app.storage_manager.get_readings().iter().any(|x| x.device_eui == r.device_eui && x.movement_count > 0))
         .collect();
     
     if pir_readings.is_empty() {
@@ -955,7 +1189,7 @@ fn render_device_select_tab(f: &mut Frame, area: ratatui::layout::Rect, app: &Ap
 
     // Device stats
     if let Some(selected_device) = &app.selected_device {
-        let device_readings: Vec<_> = app.readings
+        let device_readings: Vec<_> = app.storage_manager.get_readings()
             .iter()
             .filter(|r| &r.device_name == selected_device)
             .collect();
@@ -997,7 +1231,7 @@ fn render_device_select_tab(f: &mut Frame, area: ratatui::layout::Rect, app: &Ap
             f.render_widget(stats, chunks[1]);
         }
     } else if app.show_all_devices {
-        let total_readings = app.readings.len();
+        let total_readings = app.storage_manager.get_memory_count();
         let total_devices = devices.len();
         let total_motion_events = app.get_pir_events().len();
 
@@ -1178,8 +1412,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut terminal = Terminal::new(backend)?;
 
     // Create app and communication channel
-    let app = App::new();
+    let mut app = App::new();
     let device_names = app.device_names.clone();
+    
+    // Initialize storage
+    if let Err(e) = app.initialize_storage().await {
+        eprintln!("Warning: Failed to initialize storage: {}", e);
+    }
+    
     let (tx, rx) = mpsc::channel(100);
 
     // Spawn WebSocket handler
