@@ -3,6 +3,14 @@ name = "lora_ws_logger"
 version = "0.1.0"
 edition = "2021"
 
+[[bin]]
+name = "lora_ws_logger"
+path = "src/main.rs"
+
+[[bin]]
+name = "mcp_server"
+path = "src/mcp_server.rs"
+
 [dependencies]
 tokio = { version = "1", features = ["full"] }
 tokio-tungstenite = { version = "0.27", features = ["rustls-tls-webpki-roots"] }
@@ -16,3 +24,6 @@ chrono = "0.4"
 ratatui = "0.28"
 crossterm = "0.28"
 fxhash = "0.2"
+rmcp = { version = "0.8", features = ["server", "transport-io"] }
+anyhow = "1"
+schemars = "1"
