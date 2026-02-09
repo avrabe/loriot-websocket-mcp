@@ -1,0 +1,30 @@
+[package]
+name = "loriot-core"
+version = "0.1.0"
+edition = "2021"
+description = "Core types and logic for LoRaWAN sensor monitoring"
+license = "MIT"
+
+[features]
+default = []
+# Enable async HTTP for weather fetching (server-side)
+async = ["reqwest/json", "zip", "tokio"]
+# Enable blocking HTTP for weather fetching (CLI tools)
+blocking = ["reqwest/blocking", "reqwest/json", "zip"]
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+chrono = { version = "0.4", features = ["serde", "std"] }
+fxhash = "0.2"
+thiserror = "2.0"
+hex = "0.4"
+urlencoding = "2.1"
+
+# Optional dependencies for weather module
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"], optional = true }
+zip = { version = "2.2", default-features = false, features = ["deflate"], optional = true }
+tokio = { version = "1", features = ["sync"], optional = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+js-sys = "0.3"

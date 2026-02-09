@@ -1,0 +1,44 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom styles for sensor dashboard */
+@layer components {
+  .sensor-card {
+    @apply card bg-base-100 shadow-xl transition-all duration-200 hover:shadow-2xl;
+  }
+
+  .sensor-value {
+    @apply font-mono text-2xl font-bold;
+  }
+
+  .sensor-label {
+    @apply text-sm text-base-content/70 uppercase tracking-wide;
+  }
+
+  .status-online {
+    @apply badge badge-success gap-1;
+  }
+
+  .status-offline {
+    @apply badge badge-error gap-1;
+  }
+
+  .status-warning {
+    @apply badge badge-warning gap-1;
+  }
+
+  .chart-container {
+    @apply bg-base-100 rounded-lg p-4 shadow;
+  }
+}
+
+/* Pulse animation for live indicator */
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.live-indicator {
+  animation: pulse-dot 2s ease-in-out infinite;
+}

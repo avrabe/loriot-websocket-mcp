@@ -1,0 +1,38 @@
+[package]
+name = "loriot-server"
+version = "0.1.0"
+edition = "2021"
+description = "Web server for LoRaWAN sensor monitoring dashboard"
+license = "MIT"
+
+[[bin]]
+name = "loriot-server"
+path = "src/main.rs"
+
+[dependencies]
+loriot-core = { path = "../loriot-core", features = ["async"] }
+
+# Web framework
+axum = { version = "0.8", features = ["ws"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["fs", "cors", "trace"] }
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+tokio-tungstenite = { version = "0.28", features = ["rustls-tls-webpki-roots"] }
+rustls = { version = "0.23", features = ["ring"] }
+futures = "0.3"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Utilities
+url = "2.5"
+chrono = { version = "0.4", features = ["serde", "std"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+anyhow = "1.0"
+fastrand = "2.0"
+tokio-stream = { version = "0.1", features = ["sync"] }
+bytes = "1.9"
