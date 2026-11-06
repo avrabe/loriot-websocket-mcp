@@ -7,7 +7,7 @@ pub const SSE_READINGS: &str = "/sse/readings";
 pub const SSE_STATUS: &str = "/sse/status";
 
 /// Create an EventSource subscription for sensor readings
-#[cfg(feature = "hydrate")]
+#[cfg(any(feature = "csr", feature = "hydrate"))]
 pub fn subscribe_readings<F>(on_reading: F) -> Result<web_sys::EventSource, String>
 where
     F: Fn(SensorReading) + 'static,
@@ -34,7 +34,7 @@ where
 }
 
 /// Create an EventSource subscription for connection status
-#[cfg(feature = "hydrate")]
+#[cfg(any(feature = "csr", feature = "hydrate"))]
 pub fn subscribe_status<F>(on_status: F) -> Result<web_sys::EventSource, String>
 where
     F: Fn(ConnectionStatus) + 'static,
@@ -61,7 +61,7 @@ where
 }
 
 // Stub for server-side rendering
-#[cfg(not(feature = "hydrate"))]
+#[cfg(not(any(feature = "csr", feature = "hydrate")))]
 pub fn subscribe_readings<F>(_on_reading: F) -> Result<(), String>
 where
     F: Fn(SensorReading) + 'static,
@@ -69,7 +69,7 @@ where
     Ok(())
 }
 
-#[cfg(not(feature = "hydrate"))]
+#[cfg(not(any(feature = "csr", feature = "hydrate")))]
 pub fn subscribe_status<F>(_on_status: F) -> Result<(), String>
 where
     F: Fn(ConnectionStatus) + 'static,

@@ -5,6 +5,10 @@ members = [
     "crates/loriot-server",
     "crates/loriot-web",
 ]
+default-members = [
+    "crates/loriot-core",
+    "crates/loriot-server",
+]
 
 [workspace.package]
 version = "0.2.0"

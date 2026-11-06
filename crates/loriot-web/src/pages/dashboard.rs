@@ -5,6 +5,7 @@ use loriot_core::{DeviceStats, SensorReading, TimeWindow};
 
 use crate::api::{fetch_data_range, fetch_devices, fetch_readings, ReadingsQuery};
 use crate::components::{DataPoint, DualLineChart, Navbar, SensorCard, TimeSelectorWithNav};
+use crate::sse::subscribe_readings;
 
 /// Summary statistics for the dashboard
 #[derive(Clone, Default)]
@@ -145,6 +146,25 @@ pub fn DashboardPage() -> impl IntoView {
             }
 
             set_loading.set(false);
+        });
+    });
+
+    // Subscribe to live sensor readings via SSE
+    Effect::new(move |_| {
+        leptos::task::spawn_local(async move {
+            let _ = subscribe_readings(move |reading| {
+                // Append the new reading to the list
+                set_readings.update(|r| r.push(reading.clone()));
+                // Refresh device stats by re-fetching
+                leptos::task::spawn_local({
+                    let tw = time_window.get_untracked();
+                    async move {
+                        if let Ok(fetched) = fetch_devices(Some(&tw)).await {
+                            set_devices.set(fetched);
+                        }
+                    }
+                });
+            });
         });
     });
 

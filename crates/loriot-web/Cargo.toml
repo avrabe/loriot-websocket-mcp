@@ -25,6 +25,7 @@ chrono = { version = "0.4", features = ["serde", "std"] }
 
 # Client-side dependencies
 gloo-net = { version = "0.6", optional = true }
+gloo-timers = { version = "0.3", optional = true }
 wasm-bindgen = { version = "0.2", optional = true }
 web-sys = { version = "0.3", optional = true, features = ["EventSource", "MessageEvent", "SvgsvgElement", "DomRect", "MouseEvent", "Blob", "Url", "Document", "HtmlElement", "Window"] }
 js-sys = { version = "0.3", optional = true }
@@ -32,6 +33,6 @@ console_error_panic_hook = { version = "0.1", optional = true }
 
 [features]
 default = ["csr"]
-csr = ["leptos/csr", "gloo-net", "wasm-bindgen", "web-sys", "js-sys", "console_error_panic_hook"]
-hydrate = ["leptos/hydrate", "gloo-net", "wasm-bindgen", "web-sys", "js-sys", "console_error_panic_hook"]
+csr = ["leptos/csr", "gloo-net", "gloo-timers", "wasm-bindgen", "web-sys", "js-sys", "console_error_panic_hook"]
+hydrate = ["leptos/hydrate", "gloo-net", "gloo-timers", "wasm-bindgen", "web-sys", "js-sys", "console_error_panic_hook"]
 ssr = ["leptos/ssr"]
