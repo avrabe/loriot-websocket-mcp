@@ -322,6 +322,9 @@ mod tests {
         DropTcp,
         /// Accept TCP but never answer the websocket handshake.
         NoHandshake,
+        /// Send one message, then keep reading (so pings get pongs) but send
+        /// no data: a healthy, quiet upstream that must NOT be dropped.
+        QuietButAlive,
     }
 
     /// Start a local upstream; returns its URL and a counter of TCP accepts.
@@ -358,6 +361,11 @@ mod tests {
                         let _ = tcp.set_linger(Some(Duration::ZERO));
                         drop(tcp);
                     }
+                    Upstream::QuietButAlive => held.push(tokio::spawn(async move {
+                        // Polling the stream makes tungstenite answer pings.
+                        while let Some(Ok(_)) = ws.next().await {}
+                        std::future::pending::<()>().await;
+                    })),
                     Upstream::NoHandshake => unreachable!(),
                 }
             }
@@ -428,6 +436,21 @@ mod tests {
     async fn reconnects_when_handshake_never_completes() {
         // Uses the production connect timeout on purpose.
         assert_reconnects(Upstream::NoHandshake, fast(), Duration::from_secs(20)).await;
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn keeps_a_quiet_upstream_that_answers_pings() {
+        let (url, accepts) = spawn_upstream(Upstream::QuietButAlive).await;
+        let cfg = LoriotClientConfig { url, ..fast() };
+        let client = tokio::spawn(run_loriot_connection_with(test_state("quiet"), cfg));
+        // ~7 idle timeouts' worth of silence without data.
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        client.abort();
+        assert_eq!(
+            accepts.load(Ordering::SeqCst),
+            1,
+            "healthy upstream was dropped"
+        );
     }
 
     #[test]
