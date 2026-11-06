@@ -1,21 +1,38 @@
 //! WebSocket connection to Loriot for sensor data ingestion
+//!
+//! Liveness rules (see the 2026-10 hang): every await on the upstream is
+//! bounded. The handshake has a timeout, every write has a timeout, and the
+//! connection is declared dead when no frame (data or pong) has arrived for
+//! `pong_timeout`, measured from the last received frame, so sending pings
+//! cannot postpone it. On any end of the session the socket is dropped and
+//! the client reconnects with capped exponential backoff.
 
-use futures::{SinkExt, StreamExt};
 use bytes::Bytes;
+use futures::{SinkExt, StreamExt};
 use loriot_core::{
-    sensors::dragino::create_sensor_reading, decode_lht65s_pir, ConnectionStatus, SensorReading,
+    decode_lht65s_pir, sensors::dragino::create_sensor_reading, ConnectionStatus, SensorReading,
 };
 use serde::Deserialize;
 use std::time::Duration;
-use tokio::time::{interval, timeout};
+use tokio::time::{interval_at, sleep, sleep_until, timeout, Instant, MissedTickBehavior};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
 use crate::AppState;
 
+type BoxError = Box<dyn std::error::Error + Send + Sync>;
+
 const LORIOT_WS_URL: &str = "wss://eu1.loriot.io/app";
+/// After this many consecutive failed sessions the status turns to `Error`
+/// (the client keeps retrying at the backoff cap).
 const MAX_RETRIES: u32 = 10;
 const PING_INTERVAL: Duration = Duration::from_secs(30);
-const PONG_TIMEOUT: Duration = Duration::from_secs(60);
+/// Maximum silence (no frame at all, pongs included) before the connection is
+/// considered dead. Must be longer than `PING_INTERVAL`.
+const PONG_TIMEOUT: Duration = Duration::from_secs(75);
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+const WRITE_TIMEOUT: Duration = Duration::from_secs(10);
+const BACKOFF_BASE: Duration = Duration::from_secs(1);
+const BACKOFF_MAX: Duration = Duration::from_secs(60);
 
 #[derive(Debug, Deserialize)]
 struct LoriotPayload {
@@ -43,7 +60,12 @@ struct CachedMessage {
 pub struct LoriotClientConfig {
     pub url: String,
     pub ping_interval: Duration,
+    /// Maximum time without any received frame before the session is dropped.
     pub pong_timeout: Duration,
+    pub connect_timeout: Duration,
+    pub write_timeout: Duration,
+    pub backoff_base: Duration,
+    pub backoff_max: Duration,
 }
 
 impl Default for LoriotClientConfig {
@@ -52,8 +74,21 @@ impl Default for LoriotClientConfig {
             url: LORIOT_WS_URL.to_string(),
             ping_interval: PING_INTERVAL,
             pong_timeout: PONG_TIMEOUT,
+            connect_timeout: CONNECT_TIMEOUT,
+            write_timeout: WRITE_TIMEOUT,
+            backoff_base: BACKOFF_BASE,
+            backoff_max: BACKOFF_MAX,
         }
     }
+}
+
+/// Delay before reconnect attempt `attempt` (1-based): base * 2^(attempt-1),
+/// capped at `max`.
+fn backoff_delay(cfg: &LoriotClientConfig, attempt: u32) -> Duration {
+    let exp = attempt.saturating_sub(1).min(16);
+    cfg.backoff_base
+        .saturating_mul(1u32 << exp)
+        .min(cfg.backoff_max)
 }
 
 /// Run the Loriot WebSocket connection with automatic reconnection
@@ -61,120 +96,129 @@ pub async fn run_loriot_connection(state: AppState) {
     run_loriot_connection_with(state, LoriotClientConfig::default()).await
 }
 
-/// Run the Loriot WebSocket connection against `cfg` with automatic reconnection
+/// Run the Loriot WebSocket connection against `cfg` with automatic reconnection.
+/// Never returns.
 pub async fn run_loriot_connection_with(state: AppState, cfg: LoriotClientConfig) {
-    let mut retry_count = 0;
+    let mut attempt: u32 = 0;
 
     loop {
         state
             .set_connection_status(ConnectionStatus::Connecting)
             .await;
 
-        match connect_to_loriot(&state, &cfg).await {
-            Ok(()) => {
-                // Connection closed normally
-                retry_count = 0;
-            }
-            Err(e) => {
-                tracing::error!("WebSocket error: {}", e);
-                retry_count += 1;
+        let mut received_data = false;
+        let result = run_session(&state, &cfg, &mut received_data).await;
+        state.upstream.set_connected(false);
 
-                if retry_count >= MAX_RETRIES {
-                    state
-                        .set_connection_status(ConnectionStatus::Error(format!(
-                            "Max retries ({}) exceeded",
-                            MAX_RETRIES
-                        )))
-                        .await;
-                    retry_count = 0;
-                }
-            }
+        match result {
+            Ok(()) => tracing::info!("Loriot connection closed by upstream"),
+            Err(e) => tracing::warn!("Loriot connection lost: {}", e),
         }
 
-        state
-            .set_connection_status(ConnectionStatus::Reconnecting {
-                attempt: retry_count,
-                max_attempts: MAX_RETRIES,
-            })
-            .await;
+        // A session that delivered data counts as healthy: start over at the
+        // shortest delay. Otherwise back off further.
+        attempt = if received_data { 1 } else { attempt.saturating_add(1) };
 
-        // Exponential backoff with jitter
-        let delay = Duration::from_secs(2u64.pow(retry_count.min(6)));
-        let jitter = Duration::from_millis(fastrand::u64(0..1000));
-        tokio::time::sleep(delay + jitter).await;
+        let status = if attempt > MAX_RETRIES {
+            ConnectionStatus::Error(format!(
+                "{} consecutive failed attempts, still retrying",
+                attempt - 1
+            ))
+        } else {
+            ConnectionStatus::Reconnecting {
+                attempt,
+                max_attempts: MAX_RETRIES,
+            }
+        };
+        state.set_connection_status(status).await;
+
+        let delay = backoff_delay(&cfg, attempt);
+        let jitter = Duration::from_millis(fastrand::u64(0..=(delay.as_millis() as u64 / 4)));
+        sleep(delay + jitter).await;
     }
 }
 
-async fn connect_to_loriot(
+/// One connection session. Returns when the upstream closes, errors, or goes
+/// silent; the stream (and its socket) is dropped on return.
+async fn run_session(
     state: &AppState,
     cfg: &LoriotClientConfig,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    received_data: &mut bool,
+) -> Result<(), BoxError> {
     let url = format!("{}?token={}", cfg.url, state.config.loriot_token);
 
     tracing::info!("Connecting to Loriot WebSocket...");
 
-    let (ws_stream, _) = connect_async(&url).await?;
+    let (ws_stream, _) = timeout(cfg.connect_timeout, connect_async(&url))
+        .await
+        .map_err(|_| format!("handshake timed out after {:?}", cfg.connect_timeout))??;
     let (mut write, mut read) = ws_stream.split();
 
     state
         .set_connection_status(ConnectionStatus::Connected)
         .await;
+    state.upstream.set_connected(true);
     tracing::info!("Connected to Loriot");
 
     // Request cached messages from the last 24 hours
+    let now_ms = chrono::Utc::now().timestamp_millis();
     let cache_query = serde_json::json!({
         "cmd": "cq",
-        "from": chrono::Utc::now().timestamp_millis() - (24 * 60 * 60 * 1000),
-        "to": chrono::Utc::now().timestamp_millis(),
+        "from": now_ms - (24 * 60 * 60 * 1000),
+        "to": now_ms,
         "pagesize": 100
     });
-    write
-        .send(Message::Text(cache_query.to_string().into()))
-        .await?;
+    timeout(
+        cfg.write_timeout,
+        write.send(Message::Text(cache_query.to_string().into())),
+    )
+    .await
+    .map_err(|_| "cache query write timed out")??;
 
-    let mut ping_interval = interval(cfg.ping_interval);
+    let mut ping = interval_at(Instant::now() + cfg.ping_interval, cfg.ping_interval);
+    ping.set_missed_tick_behavior(MissedTickBehavior::Delay);
+    let mut last_rx = Instant::now();
 
     loop {
         tokio::select! {
-            _ = ping_interval.tick() => {
-                write.send(Message::Ping(Bytes::new())).await?;
-            }
-            msg = timeout(cfg.pong_timeout, read.next()) => {
-                match msg {
-                    Ok(Some(Ok(message))) => {
-                        if let Err(e) = handle_message(state, message).await {
-                            tracing::warn!("Error handling message: {}", e);
+            msg = read.next() => match msg {
+                Some(Ok(message)) => {
+                    last_rx = Instant::now();
+                    match message {
+                        Message::Text(text) => {
+                            *received_data = true;
+                            state.upstream.record_message();
+                            if let Err(e) = handle_text(state, text.as_str()).await {
+                                tracing::warn!("Error handling message: {}", e);
+                            }
                         }
-                    }
-                    Ok(Some(Err(e))) => {
-                        return Err(e.into());
-                    }
-                    Ok(None) => {
-                        tracing::info!("WebSocket connection closed");
-                        return Ok(());
-                    }
-                    Err(_) => {
-                        return Err("Ping timeout".into());
+                        Message::Close(frame) => {
+                            tracing::info!("Upstream sent close: {:?}", frame);
+                            return Ok(());
+                        }
+                        // Ping is answered by tungstenite; Pong/Binary only prove liveness.
+                        _ => {}
                     }
                 }
+                Some(Err(e)) => return Err(e.into()),
+                None => return Ok(()),
+            },
+            // The deadline is derived from the last received frame, so pings
+            // sent meanwhile do not move it.
+            _ = sleep_until(last_rx + cfg.pong_timeout) => {
+                return Err(format!("no frame from upstream for {:?}", cfg.pong_timeout).into());
+            }
+            _ = ping.tick() => {
+                timeout(cfg.write_timeout, write.send(Message::Ping(Bytes::new())))
+                    .await
+                    .map_err(|_| "ping write timed out")??;
             }
         }
     }
 }
 
-async fn handle_message(
-    state: &AppState,
-    message: Message,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let text = match message {
-        Message::Text(t) => t.to_string(),
-        Message::Pong(_) => return Ok(()),
-        Message::Ping(_) => return Ok(()),
-        Message::Close(_) => return Err("Connection closed".into()),
-        _ => return Ok(()),
-    };
-
-    let payload: LoriotPayload = serde_json::from_str(&text)?;
+async fn handle_text(state: &AppState, text: &str) -> Result<(), BoxError> {
+    let payload: LoriotPayload = serde_json::from_str(text)?;
 
     match payload.cmd.as_str() {
         "rx" | "gw" => {
@@ -332,7 +376,7 @@ mod tests {
         let ticks = Arc::new(AtomicUsize::new(0));
         let t = ticks.clone();
         let ticker = tokio::spawn(async move {
-            let mut iv = interval(Duration::from_millis(10));
+            let mut iv = tokio::time::interval(Duration::from_millis(10));
             loop {
                 iv.tick().await;
                 t.fetch_add(1, Ordering::SeqCst);
@@ -382,5 +426,13 @@ mod tests {
     async fn reconnects_when_handshake_never_completes() {
         // Uses the production connect timeout on purpose.
         assert_reconnects(Upstream::NoHandshake, fast(), Duration::from_secs(20)).await;
+    }
+
+    #[test]
+    fn backoff_is_exponential_and_capped() {
+        let cfg = LoriotClientConfig::default();
+        let secs: Vec<u64> = (1..=9).map(|a| backoff_delay(&cfg, a).as_secs()).collect();
+        assert_eq!(secs, vec![1, 2, 4, 8, 16, 32, 60, 60, 60]);
+        assert_eq!(backoff_delay(&cfg, u32::MAX), BACKOFF_MAX);
     }
 }

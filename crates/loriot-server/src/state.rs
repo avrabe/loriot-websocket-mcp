@@ -2,8 +2,40 @@
 
 use loriot_core::{AppConfig, ConnectionStatus, SensorReading, StorageManager};
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::Arc;
 use tokio::sync::{broadcast, RwLock};
+
+/// Lock-free view of the upstream (Loriot) connection, read by `/health`.
+/// Atomics only, so the health check can never wait on a contended lock.
+#[derive(Debug, Default)]
+pub struct UpstreamHealth {
+    connected: AtomicBool,
+    /// Unix time in ms of the last data message, 0 = none yet.
+    last_message_ms: AtomicI64,
+}
+
+impl UpstreamHealth {
+    pub fn set_connected(&self, connected: bool) {
+        self.connected.store(connected, Ordering::Relaxed);
+    }
+
+    pub fn record_message(&self) {
+        self.last_message_ms
+            .store(chrono::Utc::now().timestamp_millis(), Ordering::Relaxed);
+    }
+
+    pub fn connected(&self) -> bool {
+        self.connected.load(Ordering::Relaxed)
+    }
+
+    pub fn last_message(&self) -> Option<chrono::DateTime<chrono::Utc>> {
+        match self.last_message_ms.load(Ordering::Relaxed) {
+            0 => None,
+            ms => chrono::DateTime::from_timestamp_millis(ms),
+        }
+    }
+}
 
 /// Shared application state accessible by all handlers
 #[derive(Clone)]
@@ -20,6 +52,8 @@ pub struct AppState {
     pub status_tx: broadcast::Sender<ConnectionStatus>,
     /// Application configuration
     pub config: AppConfig,
+    /// Upstream connection health (for `/health`)
+    pub upstream: Arc<UpstreamHealth>,
 }
 
 impl AppState {
@@ -38,6 +72,7 @@ impl AppState {
             reading_tx,
             status_tx,
             config,
+            upstream: Arc::new(UpstreamHealth::default()),
         }
     }
 
