@@ -1,9 +1,9 @@
 [package]
 name = "loriot-core"
-version = "0.1.0"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
 description = "Core types and logic for LoRaWAN sensor monitoring"
-license = "MIT"
+license.workspace = true
 
 [features]
 default = []

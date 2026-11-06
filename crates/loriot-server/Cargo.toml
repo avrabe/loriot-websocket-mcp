@@ -1,9 +1,9 @@
 [package]
 name = "loriot-server"
-version = "0.1.0"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
 description = "Web server for LoRaWAN sensor monitoring dashboard"
-license = "MIT"
+license.workspace = true
 
 [[bin]]
 name = "loriot-server"
