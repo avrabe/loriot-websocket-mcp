@@ -1298,7 +1298,7 @@ checksum = "34080505efa8e45a4b816c349525ebe327ceaa8559756f0356cba97ef3bf7432"
 
 [[package]]
 name = "loriot-core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "chrono",
  "fxhash",
@@ -1315,7 +1315,7 @@ dependencies = [
 
 [[package]]
 name = "loriot-server"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -1338,7 +1338,7 @@ dependencies = [
 
 [[package]]
 name = "loriot-web"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "chrono",
  "console_error_panic_hook",

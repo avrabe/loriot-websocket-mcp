@@ -85,7 +85,7 @@ even while LORIOT is unreachable, so a watchdog does not restart the service
 in a loop. The upstream state is part of the body:
 
 ```json
-{"status":"ok","version":"0.2.0",
+{"status":"ok","version":"0.3.0",
  "upstream":{"connected":true,"last_message_at":"2026-11-06T21:00:00+00:00","last_message_age_secs":42}}
 ```
 
