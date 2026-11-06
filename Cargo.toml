@@ -1,29 +1,27 @@
-[package]
-name = "lora_ws_logger"
-version = "0.1.0"
+[workspace]
+resolver = "2"
+members = [
+    "crates/loriot-core",
+    "crates/loriot-server",
+    "crates/loriot-web",
+]
+default-members = [
+    "crates/loriot-core",
+    "crates/loriot-server",
+]
+
+[workspace.package]
+version = "0.2.0"
 edition = "2021"
+license = "MIT"
+repository = "https://github.com/avrabe/loriot-websocket-mcp"
 
-[[bin]]
-name = "lora_ws_logger"
-path = "src/main.rs"
-
-[[bin]]
-name = "mcp_server"
-path = "src/mcp_server.rs"
-
-[dependencies]
-tokio = { version = "1", features = ["full"] }
-tokio-tungstenite = { version = "0.27", features = ["rustls-tls-webpki-roots"] }
-futures = "0.3"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-url = "2"
-hex = "0.4"
-rustls = "0.23"
-chrono = "0.4"
-ratatui = "0.28"
-crossterm = "0.28"
+[workspace.dependencies]
+# Shared dependencies across workspace
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+chrono = { version = "0.4", features = ["serde", "std"] }
+thiserror = "2.0"
+tokio = { version = "1.48", features = ["full"] }
+tracing = "0.1"
 fxhash = "0.2"
-rmcp = { version = "0.8", features = ["server", "transport-io"] }
-anyhow = "1"
-schemars = "1"

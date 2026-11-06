@@ -1,7 +1,7 @@
 # Rust
 /target/
+**/target/
 **/*.rs.bk
-Cargo.lock
 
 # IDE
 .vscode/
@@ -15,10 +15,30 @@ Thumbs.db
 
 # Local configuration
 devices.json
+.env
 
 # Data storage
-sensor_history.jsonl
-sensor_history.jsonl.*
+*.jsonl
+*.jsonl.*
+*.json.md
+
+# Node
+node_modules/
+
+# Data / non-source files
+climate_data_*.json
+daily_calculations.json
+energy_data.json
+weather_location.json
+station_*.txt
+stations.txt
+description.txt
+produktflyer_s735.*
+tageswerte_KL_*/
+
+# Generated WASM / JS assets
+assets/
+crates/loriot-server/assets/
 
 # Logs
 *.log
