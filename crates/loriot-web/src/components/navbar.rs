@@ -8,7 +8,6 @@ use crate::sse::subscribe_status;
 /// Navigation bar with links and connection status
 #[component]
 pub fn Navbar() -> impl IntoView {
-    let (connection_status, set_connection_status) = signal(ConnectionStatus::Disconnected);
     let (status_text, set_status_text) = signal("Disconnected".to_string());
     let (status_color, set_status_color) = signal("badge-error".to_string());
     let (status_icon, set_status_icon) = signal("bg-error".to_string());
@@ -16,9 +15,8 @@ pub fn Navbar() -> impl IntoView {
     // Subscribe to connection status updates
     Effect::new(move |_| {
         leptos::task::spawn_local(async move {
-            if let Ok(_) = subscribe_status(move |status| {
-                set_connection_status.set(status.clone());
-                
+            // The returned handle is dropped right away, as before this change.
+            let _ = subscribe_status(move |status| {
                 // Update UI based on connection status
                 match status {
                     ConnectionStatus::Connected => {
@@ -47,9 +45,7 @@ pub fn Navbar() -> impl IntoView {
                         set_status_icon.set("bg-error".to_string());
                     }
                 }
-            }) {
-                // Subscription successful
-            }
+            });
         });
     });
 

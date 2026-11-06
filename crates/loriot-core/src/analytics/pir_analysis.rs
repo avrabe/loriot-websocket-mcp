@@ -57,7 +57,7 @@ impl PIRAnalyzer {
             .enumerate()
             .map(|(h, &count)| (h as u8, count))
             .collect();
-        hours_with_activity.sort_by(|a, b| b.1.cmp(&a.1));
+        hours_with_activity.sort_by_key(|h| std::cmp::Reverse(h.1));
         let peak_activity_hours: Vec<u8> = hours_with_activity
             .iter()
             .take(3)
