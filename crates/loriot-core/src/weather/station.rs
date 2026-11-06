@@ -182,7 +182,9 @@ impl StationDatabase {
     pub fn get(&self, id: &str) -> Option<&WeatherStation> {
         // Normalize ID to 5 digits with leading zeros
         let normalized_id = format!("{:0>5}", id);
-        self.stations.get(&normalized_id).or_else(|| self.stations.get(id))
+        self.stations
+            .get(&normalized_id)
+            .or_else(|| self.stations.get(id))
     }
 
     /// Get all stations
@@ -205,7 +207,9 @@ impl StationDatabase {
             .min_by(|a, b| {
                 let dist_a = a.distance_to(coords);
                 let dist_b = b.distance_to(coords);
-                dist_a.partial_cmp(&dist_b).unwrap_or(std::cmp::Ordering::Equal)
+                dist_a
+                    .partial_cmp(&dist_b)
+                    .unwrap_or(std::cmp::Ordering::Equal)
             })
     }
 
@@ -218,9 +222,8 @@ impl StationDatabase {
             .map(|s| (s, s.distance_to(coords)))
             .collect();
 
-        stations_with_distance.sort_by(|a, b| {
-            a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal)
-        });
+        stations_with_distance
+            .sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
 
         stations_with_distance.into_iter().take(n).collect()
     }
@@ -336,14 +339,20 @@ impl StationFetcher {
             .min_by(|a, b| {
                 let dist_a = a.distance_to(coords);
                 let dist_b = b.distance_to(coords);
-                dist_a.partial_cmp(&dist_b).unwrap_or(std::cmp::Ordering::Equal)
+                dist_a
+                    .partial_cmp(&dist_b)
+                    .unwrap_or(std::cmp::Ordering::Equal)
             });
 
         Ok(nearest)
     }
 
     /// Find the N nearest stations to given coordinates
-    pub async fn find_nearest_n(&self, coords: &Coordinates, n: usize) -> Result<Vec<(WeatherStation, f64)>> {
+    pub async fn find_nearest_n(
+        &self,
+        coords: &Coordinates,
+        n: usize,
+    ) -> Result<Vec<(WeatherStation, f64)>> {
         let stations = self.get_stations().await?;
 
         let mut stations_with_distance: Vec<_> = stations
@@ -355,9 +364,8 @@ impl StationFetcher {
             })
             .collect();
 
-        stations_with_distance.sort_by(|a, b| {
-            a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal)
-        });
+        stations_with_distance
+            .sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
 
         Ok(stations_with_distance.into_iter().take(n).collect())
     }
@@ -393,7 +401,11 @@ impl StationFetcher {
 
         for (line_num, line) in text.lines().enumerate() {
             // Skip header lines (first 2 lines) and empty lines
-            if line_num < 2 || line.trim().is_empty() || line.starts_with("Stations_id") || line.starts_with("-") {
+            if line_num < 2
+                || line.trim().is_empty()
+                || line.starts_with("Stations_id")
+                || line.starts_with("-")
+            {
                 continue;
             }
 
@@ -403,7 +415,9 @@ impl StationFetcher {
         }
 
         if stations.is_empty() {
-            return Err(AppError::Weather("No stations found in DWD response".to_string()));
+            return Err(AppError::Weather(
+                "No stations found in DWD response".to_string(),
+            ));
         }
 
         Ok(stations)
@@ -412,7 +426,9 @@ impl StationFetcher {
     /// Get cache status
     pub async fn cache_status(&self) -> Option<(usize, u64)> {
         let cache = self.cache.read().await;
-        cache.as_ref().map(|c| (c.stations.len(), c.fetched_at.elapsed().as_secs()))
+        cache
+            .as_ref()
+            .map(|c| (c.stations.len(), c.fetched_at.elapsed().as_secs()))
     }
 }
 

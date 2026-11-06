@@ -47,10 +47,7 @@ pub async fn analyze_thermal(
     // Get weather data
     let weather = state.weather.read().await;
     let weather_records = weather.storage.read_all_from_disk().unwrap_or_default();
-    let weather_data: Vec<_> = weather_records
-        .iter()
-        .map(|r| r.weather.clone())
-        .collect();
+    let weather_data: Vec<_> = weather_records.iter().map(|r| r.weather.clone()).collect();
     drop(weather);
 
     // Run thermal analysis
@@ -99,10 +96,7 @@ pub async fn get_thermal_summary(
     // Get weather data
     let weather = state.weather.read().await;
     let weather_records = weather.storage.read_all_from_disk().unwrap_or_default();
-    let weather_data: Vec<_> = weather_records
-        .iter()
-        .map(|r| r.weather.clone())
-        .collect();
+    let weather_data: Vec<_> = weather_records.iter().map(|r| r.weather.clone()).collect();
     drop(weather);
 
     // Run thermal analysis
@@ -114,7 +108,11 @@ pub async fn get_thermal_summary(
         avg_outdoor_temp: report.building_metrics.avg_outdoor_temp,
         temp_difference: report.building_metrics.avg_temp_difference,
         insulation_rating: format!("{:?}", report.building_metrics.insulation_rating),
-        insulation_description: report.building_metrics.insulation_rating.description().to_string(),
+        insulation_description: report
+            .building_metrics
+            .insulation_rating
+            .description()
+            .to_string(),
         heating_degree_days: report.heating_degree_days,
         devices_analyzed: report.device_analysis.len(),
         data_quality: format!("{:?}", report.data_quality.quality_rating),

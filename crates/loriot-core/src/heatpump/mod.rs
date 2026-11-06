@@ -165,19 +165,13 @@ impl HeatPumpAnalyzer {
     }
 
     /// Analyze heat pump efficiency
-    pub fn analyze(
-        &self,
-        readings: &[SensorReading],
-        weather: &[DailyWeather],
-    ) -> HeatPumpReport {
+    pub fn analyze(&self, readings: &[SensorReading], weather: &[DailyWeather]) -> HeatPumpReport {
         // Group readings by date
         let readings_by_date = self.group_readings_by_date(readings);
 
         // Create weather lookup
-        let weather_by_date: HashMap<&str, &DailyWeather> = weather
-            .iter()
-            .map(|w| (w.date.as_str(), w))
-            .collect();
+        let weather_by_date: HashMap<&str, &DailyWeather> =
+            weather.iter().map(|w| (w.date.as_str(), w)).collect();
 
         // Analyze each day
         let mut daily: Vec<DailyHeatPumpAnalysis> = Vec::new();
@@ -214,7 +208,10 @@ impl HeatPumpAnalyzer {
     }
 
     /// Group readings by date (YYYYMMDD)
-    fn group_readings_by_date<'a>(&self, readings: &'a [SensorReading]) -> HashMap<String, Vec<&'a SensorReading>> {
+    fn group_readings_by_date<'a>(
+        &self,
+        readings: &'a [SensorReading],
+    ) -> HashMap<String, Vec<&'a SensorReading>> {
         let mut grouped: HashMap<String, Vec<&SensorReading>> = HashMap::new();
 
         for reading in readings {
@@ -276,27 +273,33 @@ impl HeatPumpAnalyzer {
             let avg_temp = temps.iter().sum::<f32>() / temps.len() as f32;
             let min_temp = temps.iter().cloned().fold(f32::INFINITY, f32::min);
             let max_temp = temps.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-            let avg_humidity = device_humidities.get(device_id).map(|h| {
-                h.iter().sum::<f32>() / h.len() as f32
-            });
+            let avg_humidity = device_humidities
+                .get(device_id)
+                .map(|h| h.iter().sum::<f32>() / h.len() as f32);
 
-            let name = self.config.device_names
+            let name = self
+                .config
+                .device_names
                 .get(device_id)
                 .cloned()
                 .unwrap_or_else(|| device_id.clone());
 
-            device_stats.insert(device_id.clone(), SourceDeviceStats {
-                name,
-                avg_temp,
-                min_temp,
-                max_temp,
-                avg_humidity,
-                readings: temps.len(),
-            });
+            device_stats.insert(
+                device_id.clone(),
+                SourceDeviceStats {
+                    name,
+                    avg_temp,
+                    min_temp,
+                    max_temp,
+                    avg_humidity,
+                    readings: temps.len(),
+                },
+            );
         }
 
         // Overall source temperature
-        let all_temps: Vec<f32> = readings.iter()
+        let all_temps: Vec<f32> = readings
+            .iter()
             .filter_map(|r| r.parsed_temperature)
             .collect();
         let source_temp = if all_temps.is_empty() {
@@ -376,19 +379,15 @@ impl HeatPumpAnalyzer {
             };
         }
 
-        let source_temps: Vec<f32> = daily.iter()
-            .filter_map(|d| d.source_temp)
-            .collect();
-        let outdoor_temps: Vec<f32> = daily.iter()
-            .filter_map(|d| d.outdoor_temp)
-            .collect();
-        let temp_advantages: Vec<f32> = daily.iter()
-            .filter_map(|d| d.temp_advantage)
-            .collect();
-        let heating_cops: Vec<f32> = daily.iter()
+        let source_temps: Vec<f32> = daily.iter().filter_map(|d| d.source_temp).collect();
+        let outdoor_temps: Vec<f32> = daily.iter().filter_map(|d| d.outdoor_temp).collect();
+        let temp_advantages: Vec<f32> = daily.iter().filter_map(|d| d.temp_advantage).collect();
+        let heating_cops: Vec<f32> = daily
+            .iter()
             .filter_map(|d| d.heating_cop_estimate)
             .collect();
-        let cooling_cops: Vec<f32> = daily.iter()
+        let cooling_cops: Vec<f32> = daily
+            .iter()
             .filter_map(|d| d.cooling_cop_estimate)
             .collect();
 
@@ -422,12 +421,8 @@ impl HeatPumpAnalyzer {
             Some(cooling_cops.iter().sum::<f32>() / cooling_cops.len() as f32)
         };
 
-        let total_heating_degree_days: f32 = daily.iter()
-            .map(|d| d.heating_degree_days)
-            .sum();
-        let total_cooling_degree_days: f32 = daily.iter()
-            .map(|d| d.cooling_degree_days)
-            .sum();
+        let total_heating_degree_days: f32 = daily.iter().map(|d| d.heating_degree_days).sum();
+        let total_cooling_degree_days: f32 = daily.iter().map(|d| d.cooling_degree_days).sum();
 
         // Estimate energy savings vs air-source heat pump
         // Ground source typically has 30-50% better COP
@@ -478,23 +473,28 @@ impl HeatPumpAnalyzer {
                 continue;
             }
 
-            let name = self.config.device_names
+            let name = self
+                .config
+                .device_names
                 .get(&device_id)
                 .cloned()
                 .unwrap_or_else(|| device_id.clone());
 
-            stats.insert(device_id, DeviceSummary {
-                name,
-                avg_temp: temps.iter().sum::<f32>() / temps.len() as f32,
-                min_temp: temps.iter().cloned().fold(f32::INFINITY, f32::min),
-                max_temp: temps.iter().cloned().fold(f32::NEG_INFINITY, f32::max),
-                avg_humidity: if humidities.is_empty() {
-                    None
-                } else {
-                    Some(humidities.iter().sum::<f32>() / humidities.len() as f32)
+            stats.insert(
+                device_id,
+                DeviceSummary {
+                    name,
+                    avg_temp: temps.iter().sum::<f32>() / temps.len() as f32,
+                    min_temp: temps.iter().cloned().fold(f32::INFINITY, f32::min),
+                    max_temp: temps.iter().cloned().fold(f32::NEG_INFINITY, f32::max),
+                    avg_humidity: if humidities.is_empty() {
+                        None
+                    } else {
+                        Some(humidities.iter().sum::<f32>() / humidities.len() as f32)
+                    },
+                    total_readings: temps.len(),
                 },
-                total_readings: temps.len(),
-            });
+            );
         }
 
         stats
@@ -514,16 +514,12 @@ impl HeatPumpAnalyzer {
                 return None;
             }
 
-            let source_temps: Vec<f32> = analyses.iter()
-                .filter_map(|a| a.source_temp)
-                .collect();
-            let outdoor_temps: Vec<f32> = analyses.iter()
-                .filter_map(|a| a.outdoor_temp)
-                .collect();
-            let temp_advantages: Vec<f32> = analyses.iter()
-                .filter_map(|a| a.temp_advantage)
-                .collect();
-            let cops: Vec<f32> = analyses.iter()
+            let source_temps: Vec<f32> = analyses.iter().filter_map(|a| a.source_temp).collect();
+            let outdoor_temps: Vec<f32> = analyses.iter().filter_map(|a| a.outdoor_temp).collect();
+            let temp_advantages: Vec<f32> =
+                analyses.iter().filter_map(|a| a.temp_advantage).collect();
+            let cops: Vec<f32> = analyses
+                .iter()
                 .filter_map(|a| a.heating_cop_estimate)
                 .collect();
 

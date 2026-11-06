@@ -142,13 +142,24 @@ pub fn TimeSelectorWithNav(
             // All time - use actual data range if available from props
             let actual_start = data_start.and_then(|s| s.get());
             let actual_end = data_end.and_then(|e| e.get());
-            leptos::logging::log!("All Time mode: start={:?}, end={:?}", actual_start, actual_end);
+            leptos::logging::log!(
+                "All Time mode: start={:?}, end={:?}",
+                actual_start,
+                actual_end
+            );
             (actual_start, actual_end.unwrap_or(now))
         } else {
             // Specific time window - show calculated range based on selection
             let end = now - (off as u64 * duration);
             let start = end - duration;
-            leptos::logging::log!("Time window: duration={}, offset={}, now={}, start={}, end={}", duration, off, now, start, end);
+            leptos::logging::log!(
+                "Time window: duration={}, offset={}, now={}, start={}, end={}",
+                duration,
+                off,
+                now,
+                start,
+                end
+            );
             (Some(start), end)
         }
     };

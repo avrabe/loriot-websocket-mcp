@@ -90,10 +90,7 @@ pub async fn fetch_data_range() -> Result<DataRange, String> {
     use gloo_net::http::Request;
 
     let url = format!("{}/data-range", API_BASE);
-    let response = Request::get(&url)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
+    let response = Request::get(&url).send().await.map_err(|e| e.to_string())?;
 
     response.json().await.map_err(|e| e.to_string())
 }
@@ -126,10 +123,7 @@ pub async fn fetch_readings(query: ReadingsQuery) -> Result<PaginatedReadings, S
         url.push_str(&params.join("&"));
     }
 
-    let response = Request::get(&url)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
+    let response = Request::get(&url).send().await.map_err(|e| e.to_string())?;
 
     response.json().await.map_err(|e| e.to_string())
 }
@@ -144,10 +138,7 @@ pub async fn fetch_devices(time_window: Option<&TimeWindow>) -> Result<Vec<Devic
         url.push_str(&format!("?time_window={}", time_window_to_string(tw)));
     }
 
-    let response = Request::get(&url)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
+    let response = Request::get(&url).send().await.map_err(|e| e.to_string())?;
 
     response.json().await.map_err(|e| e.to_string())
 }
@@ -176,10 +167,7 @@ pub async fn fetch_device_readings(
         url.push_str(&params.join("&"));
     }
 
-    let response = Request::get(&url)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
+    let response = Request::get(&url).send().await.map_err(|e| e.to_string())?;
 
     response.json().await.map_err(|e| e.to_string())
 }
@@ -250,10 +238,7 @@ pub async fn fetch_analytics(
         format!("{}?{}", base, params.join("&"))
     };
 
-    let response = Request::get(&url)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
+    let response = Request::get(&url).send().await.map_err(|e| e.to_string())?;
 
     response.json().await.map_err(|e| e.to_string())
 }
@@ -421,10 +406,7 @@ pub async fn fetch_weather_info() -> Result<WeatherInfo, String> {
     use gloo_net::http::Request;
 
     let url = format!("{}/weather/info", API_BASE);
-    let response = Request::get(&url)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
+    let response = Request::get(&url).send().await.map_err(|e| e.to_string())?;
 
     response.json().await.map_err(|e| e.to_string())
 }
@@ -435,10 +417,7 @@ pub async fn fetch_current_weather() -> Result<OutdoorSummary, String> {
     use gloo_net::http::Request;
 
     let url = format!("{}/weather/current", API_BASE);
-    let response = Request::get(&url)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
+    let response = Request::get(&url).send().await.map_err(|e| e.to_string())?;
 
     response.json().await.map_err(|e| e.to_string())
 }
@@ -453,10 +432,7 @@ pub async fn fetch_weather_history(days: Option<usize>) -> Result<Vec<OutdoorSum
         None => format!("{}/weather/history", API_BASE),
     };
 
-    let response = Request::get(&url)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
+    let response = Request::get(&url).send().await.map_err(|e| e.to_string())?;
 
     response.json().await.map_err(|e| e.to_string())
 }
@@ -467,10 +443,7 @@ pub async fn fetch_weather_statistics() -> Result<WeatherStatistics, String> {
     use gloo_net::http::Request;
 
     let url = format!("{}/weather/statistics", API_BASE);
-    let response = Request::get(&url)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
+    let response = Request::get(&url).send().await.map_err(|e| e.to_string())?;
 
     response.json().await.map_err(|e| e.to_string())
 }
@@ -483,17 +456,17 @@ pub async fn geocode_address(address: &str) -> Result<GeocodingResponse, String>
     let encoded = js_sys::encode_uri_component(address);
     let url = format!("{}/weather/geocode?address={}", API_BASE, encoded);
 
-    let response = Request::get(&url)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
+    let response = Request::get(&url).send().await.map_err(|e| e.to_string())?;
 
     response.json().await.map_err(|e| e.to_string())
 }
 
 /// Fetch available stations
 #[cfg(any(feature = "hydrate", feature = "csr"))]
-pub async fn fetch_stations(lat: Option<f64>, lon: Option<f64>) -> Result<StationsResponse, String> {
+pub async fn fetch_stations(
+    lat: Option<f64>,
+    lon: Option<f64>,
+) -> Result<StationsResponse, String> {
     use gloo_net::http::Request;
 
     let url = match (lat, lon) {
@@ -501,10 +474,7 @@ pub async fn fetch_stations(lat: Option<f64>, lon: Option<f64>) -> Result<Statio
         _ => format!("{}/weather/stations", API_BASE),
     };
 
-    let response = Request::get(&url)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
+    let response = Request::get(&url).send().await.map_err(|e| e.to_string())?;
 
     response.json().await.map_err(|e| e.to_string())
 }
@@ -573,7 +543,10 @@ pub async fn geocode_address(_address: &str) -> Result<GeocodingResponse, String
 }
 
 #[cfg(not(any(feature = "hydrate", feature = "csr")))]
-pub async fn fetch_stations(_lat: Option<f64>, _lon: Option<f64>) -> Result<StationsResponse, String> {
+pub async fn fetch_stations(
+    _lat: Option<f64>,
+    _lon: Option<f64>,
+) -> Result<StationsResponse, String> {
     Ok(StationsResponse { stations: vec![] })
 }
 
@@ -712,10 +685,7 @@ pub async fn fetch_heatpump_info() -> Result<HeatPumpInfo, String> {
     use gloo_net::http::Request;
 
     let url = format!("{}/heatpump/info", API_BASE);
-    let response = Request::get(&url)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
+    let response = Request::get(&url).send().await.map_err(|e| e.to_string())?;
 
     response.json().await.map_err(|e| e.to_string())
 }
@@ -726,10 +696,7 @@ pub async fn fetch_heatpump_devices() -> Result<Vec<DeviceOption>, String> {
     use gloo_net::http::Request;
 
     let url = format!("{}/heatpump/devices", API_BASE);
-    let response = Request::get(&url)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
+    let response = Request::get(&url).send().await.map_err(|e| e.to_string())?;
 
     response.json().await.map_err(|e| e.to_string())
 }
@@ -763,10 +730,7 @@ pub async fn analyze_heatpump(days: Option<usize>) -> Result<HeatPumpReport, Str
         None => format!("{}/heatpump/analyze", API_BASE),
     };
 
-    let response = Request::get(&url)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
+    let response = Request::get(&url).send().await.map_err(|e| e.to_string())?;
 
     response.json().await.map_err(|e| e.to_string())
 }
@@ -829,18 +793,18 @@ impl Default for EnergyPrices {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ApartmentUnit {
     pub id: u32,
-    pub name: String,              // e.g., "EG links", "1.OG rechts", "WE 3"
-    pub area_m2: f64,              // Living area
-    pub distribution_units: f64,   // Heizkostenverteiler-Einheiten
-    pub is_reference: bool,        // Is this the reference unit with consumption data?
+    pub name: String,            // e.g., "EG links", "1.OG rechts", "WE 3"
+    pub area_m2: f64,            // Living area
+    pub distribution_units: f64, // Heizkostenverteiler-Einheiten
+    pub is_reference: bool,      // Is this the reference unit with consumption data?
     pub notes: Option<String>,
 }
 
 /// Cost distribution settings
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CostDistributionSettings {
-    pub base_cost_percent: f64,    // Grundkostenanteil (typically 30-50%)
-    // Verbrauchskostenanteil = 100 - base_cost_percent
+    pub base_cost_percent: f64, // Grundkostenanteil (typically 30-50%)
+                                // Verbrauchskostenanteil = 100 - base_cost_percent
 }
 
 impl Default for CostDistributionSettings {
@@ -857,11 +821,11 @@ pub struct ApartmentCostBreakdown {
     pub apartment_id: u32,
     pub name: String,
     pub area_m2: f64,
-    pub area_share_percent: f64,        // Share of total area
+    pub area_share_percent: f64, // Share of total area
     pub distribution_units: f64,
-    pub consumption_share_percent: f64,  // Share of total consumption
-    pub base_cost_eur: f64,              // Grundkosten-Anteil
-    pub consumption_cost_eur: f64,       // Verbrauchskosten-Anteil
+    pub consumption_share_percent: f64, // Share of total consumption
+    pub base_cost_eur: f64,             // Grundkosten-Anteil
+    pub consumption_cost_eur: f64,      // Verbrauchskosten-Anteil
     pub total_cost_eur: f64,
     pub cost_per_m2: f64,
 }
@@ -1002,10 +966,7 @@ pub async fn fetch_energy_overview() -> Result<EnergyOverview, String> {
     use gloo_net::http::Request;
 
     let url = format!("{}/energy/overview", API_BASE);
-    let response = Request::get(&url)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
+    let response = Request::get(&url).send().await.map_err(|e| e.to_string())?;
 
     response.json().await.map_err(|e| e.to_string())
 }
@@ -1016,10 +977,7 @@ pub async fn fetch_energy_consumption() -> Result<ConsumptionResponse, String> {
     use gloo_net::http::Request;
 
     let url = format!("{}/energy/consumption", API_BASE);
-    let response = Request::get(&url)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
+    let response = Request::get(&url).send().await.map_err(|e| e.to_string())?;
 
     response.json().await.map_err(|e| e.to_string())
 }
@@ -1034,17 +992,16 @@ pub async fn fetch_energy_scenarios(year: Option<u32>) -> Result<ScenarioCompari
         None => format!("{}/energy/scenarios", API_BASE),
     };
 
-    let response = Request::get(&url)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
+    let response = Request::get(&url).send().await.map_err(|e| e.to_string())?;
 
     response.json().await.map_err(|e| e.to_string())
 }
 
 /// Update building profile
 #[cfg(any(feature = "hydrate", feature = "csr"))]
-pub async fn update_energy_building(request: UpdateBuildingRequest) -> Result<BuildingProfile, String> {
+pub async fn update_energy_building(
+    request: UpdateBuildingRequest,
+) -> Result<BuildingProfile, String> {
     use gloo_net::http::Request;
 
     let url = format!("{}/energy/building", API_BASE);
@@ -1082,7 +1039,9 @@ pub async fn update_energy_prices(request: UpdatePricesRequest) -> Result<Energy
 
 /// Update apartments
 #[cfg(any(feature = "hydrate", feature = "csr"))]
-pub async fn update_energy_apartments(request: UpdateApartmentsRequest) -> Result<Vec<ApartmentUnit>, String> {
+pub async fn update_energy_apartments(
+    request: UpdateApartmentsRequest,
+) -> Result<Vec<ApartmentUnit>, String> {
     use gloo_net::http::Request;
 
     let url = format!("{}/energy/apartments", API_BASE);
@@ -1101,7 +1060,9 @@ pub async fn update_energy_apartments(request: UpdateApartmentsRequest) -> Resul
 
 /// Add consumption record
 #[cfg(any(feature = "hydrate", feature = "csr"))]
-pub async fn add_energy_consumption(request: AddConsumptionRequest) -> Result<MonthlyConsumption, String> {
+pub async fn add_energy_consumption(
+    request: AddConsumptionRequest,
+) -> Result<MonthlyConsumption, String> {
     use gloo_net::http::Request;
 
     let url = format!("{}/energy/consumption", API_BASE);
@@ -1158,7 +1119,9 @@ pub async fn fetch_energy_scenarios(_year: Option<u32>) -> Result<ScenarioCompar
 }
 
 #[cfg(not(any(feature = "hydrate", feature = "csr")))]
-pub async fn update_energy_building(_request: UpdateBuildingRequest) -> Result<BuildingProfile, String> {
+pub async fn update_energy_building(
+    _request: UpdateBuildingRequest,
+) -> Result<BuildingProfile, String> {
     Err("Server-side rendering".to_string())
 }
 
@@ -1168,12 +1131,16 @@ pub async fn update_energy_prices(_request: UpdatePricesRequest) -> Result<Energ
 }
 
 #[cfg(not(any(feature = "hydrate", feature = "csr")))]
-pub async fn update_energy_apartments(_request: UpdateApartmentsRequest) -> Result<Vec<ApartmentUnit>, String> {
+pub async fn update_energy_apartments(
+    _request: UpdateApartmentsRequest,
+) -> Result<Vec<ApartmentUnit>, String> {
     Err("Server-side rendering".to_string())
 }
 
 #[cfg(not(any(feature = "hydrate", feature = "csr")))]
-pub async fn add_energy_consumption(_request: AddConsumptionRequest) -> Result<MonthlyConsumption, String> {
+pub async fn add_energy_consumption(
+    _request: AddConsumptionRequest,
+) -> Result<MonthlyConsumption, String> {
     Err("Server-side rendering".to_string())
 }
 
@@ -1271,7 +1238,10 @@ pub struct ThermalSummary {
 
 /// Fetch full thermal analysis
 #[cfg(any(feature = "hydrate", feature = "csr"))]
-pub async fn fetch_thermal_analysis(days: Option<usize>, device: Option<&str>) -> Result<ThermalAnalysisReport, String> {
+pub async fn fetch_thermal_analysis(
+    days: Option<usize>,
+    device: Option<&str>,
+) -> Result<ThermalAnalysisReport, String> {
     use gloo_net::http::Request;
 
     let mut params = Vec::new();
@@ -1288,10 +1258,7 @@ pub async fn fetch_thermal_analysis(days: Option<usize>, device: Option<&str>) -
         format!("{}/thermal/analyze?{}", API_BASE, params.join("&"))
     };
 
-    let response = Request::get(&url)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
+    let response = Request::get(&url).send().await.map_err(|e| e.to_string())?;
 
     response.json().await.map_err(|e| e.to_string())
 }
@@ -1306,17 +1273,17 @@ pub async fn fetch_thermal_summary(days: Option<usize>) -> Result<ThermalSummary
         None => format!("{}/thermal/summary", API_BASE),
     };
 
-    let response = Request::get(&url)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
+    let response = Request::get(&url).send().await.map_err(|e| e.to_string())?;
 
     response.json().await.map_err(|e| e.to_string())
 }
 
 // Server-side stubs for thermal API
 #[cfg(not(any(feature = "hydrate", feature = "csr")))]
-pub async fn fetch_thermal_analysis(_days: Option<usize>, _device: Option<&str>) -> Result<ThermalAnalysisReport, String> {
+pub async fn fetch_thermal_analysis(
+    _days: Option<usize>,
+    _device: Option<&str>,
+) -> Result<ThermalAnalysisReport, String> {
     Err("Server-side rendering".to_string())
 }
 
@@ -1402,21 +1369,20 @@ pub async fn fetch_weather_forecast(days: Option<u8>) -> Result<WeatherForecastS
         None => format!("{}/forecast", API_BASE),
     };
 
-    let response = Request::get(&url)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
+    let response = Request::get(&url).send().await.map_err(|e| e.to_string())?;
 
     // The API returns a tagged enum with status field
     let result: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
 
     if result.get("status").and_then(|s| s.as_str()) == Some("error") {
-        let error = result.get("error").and_then(|e| e.as_str()).unwrap_or("Unknown error");
+        let error = result
+            .get("error")
+            .and_then(|e| e.as_str())
+            .unwrap_or("Unknown error");
         return Err(error.to_string());
     }
 
-    serde_json::from_value(result)
-        .map_err(|e| e.to_string())
+    serde_json::from_value(result).map_err(|e| e.to_string())
 }
 
 /// Fetch room temperature predictions
@@ -1445,10 +1411,7 @@ pub async fn fetch_room_forecast(
         format!("{}/forecast/rooms?{}", API_BASE, params.join("&"))
     };
 
-    let response = Request::get(&url)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
+    let response = Request::get(&url).send().await.map_err(|e| e.to_string())?;
 
     response.json().await.map_err(|e| e.to_string())
 }

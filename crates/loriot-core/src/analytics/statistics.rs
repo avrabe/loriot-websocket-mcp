@@ -29,10 +29,7 @@ impl StatisticalAnalyzer {
             .filter_map(|r| r.parsed_temperature)
             .collect();
 
-        let humidities: Vec<f32> = readings
-            .iter()
-            .filter_map(|r| r.parsed_humidity)
-            .collect();
+        let humidities: Vec<f32> = readings.iter().filter_map(|r| r.parsed_humidity).collect();
 
         let voltages: Vec<f32> = readings
             .iter()

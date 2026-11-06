@@ -228,9 +228,7 @@ impl EnvironmentalAnalyzer {
         let rh = humidity;
         let t = temp_f;
 
-        let hi = -42.379
-            + 2.049_015_3 * t
-            + 10.143_332 * rh
+        let hi = -42.379 + 2.049_015_3 * t + 10.143_332 * rh
             - 0.224_755_4 * t * rh
             - 0.00683783 * t * t
             - 0.05481717 * rh * rh
@@ -354,7 +352,9 @@ impl EnvironmentalAnalyzer {
 
     fn classify_comfort(temp: f32, humidity: f32) -> ComfortType {
         match (temp, humidity) {
-            (t, h) if (20.0..=24.0).contains(&t) && (40.0..=60.0).contains(&h) => ComfortType::Optimal,
+            (t, h) if (20.0..=24.0).contains(&t) && (40.0..=60.0).contains(&h) => {
+                ComfortType::Optimal
+            }
             (t, h) if (18.0..=26.0).contains(&t) && (30.0..=70.0).contains(&h) => {
                 ComfortType::Acceptable
             }

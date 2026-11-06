@@ -1,14 +1,13 @@
 //! Heat Pump Analytics Page
 
-use leptos::prelude::*;
-use leptos::task::spawn_local;
 use crate::api::{
-    fetch_heatpump_info, fetch_heatpump_devices, configure_heatpump, analyze_heatpump,
-    fetch_weather_info,
-    HeatPumpInfo, HeatPumpReport, DeviceOption, ConfigureHeatPumpRequest,
-    SeasonSummary, DailyHeatPumpAnalysis, WeatherInfo,
+    analyze_heatpump, configure_heatpump, fetch_heatpump_devices, fetch_heatpump_info,
+    fetch_weather_info, ConfigureHeatPumpRequest, DailyHeatPumpAnalysis, DeviceOption,
+    HeatPumpInfo, HeatPumpReport, SeasonSummary, WeatherInfo,
 };
 use crate::components::Navbar;
+use leptos::prelude::*;
+use leptos::task::spawn_local;
 
 /// Heat Pump analytics page component
 #[component]
@@ -276,13 +275,16 @@ fn DeviceCard(
     } else {
         // No friendly name, show shortened EUI
         if device.eui.len() > 8 {
-            format!("...{}", &device.eui[device.eui.len()-8..])
+            format!("...{}", &device.eui[device.eui.len() - 8..])
         } else {
             device.eui.clone()
         }
     };
     let eui_display = device.eui.clone();
-    let avg_temp = device.avg_temperature.map(|t| format!("{:.1}°C", t)).unwrap_or_else(|| "-".to_string());
+    let avg_temp = device
+        .avg_temperature
+        .map(|t| format!("{:.1}°C", t))
+        .unwrap_or_else(|| "-".to_string());
     let reading_count = device.reading_count;
     let eui_clone = eui.clone();
 
@@ -541,8 +543,15 @@ fn DailyAnalysisRow(analysis: DailyHeatPumpAnalysis) -> impl IntoView {
         _ => "",
     };
 
-    let advantage_class = analysis.temp_advantage
-        .map(|a| if a > 0.0 { "text-success" } else { "text-error" })
+    let advantage_class = analysis
+        .temp_advantage
+        .map(|a| {
+            if a > 0.0 {
+                "text-success"
+            } else {
+                "text-error"
+            }
+        })
         .unwrap_or("");
 
     view! {

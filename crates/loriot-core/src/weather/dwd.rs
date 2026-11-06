@@ -13,7 +13,8 @@ use std::io::{BufRead, Read};
 use std::path::Path;
 
 /// DWD Open Data base URL
-const DWD_BASE_URL: &str = "https://opendata.dwd.de/climate_environment/CDC/observations_germany/climate/daily/kl";
+const DWD_BASE_URL: &str =
+    "https://opendata.dwd.de/climate_environment/CDC/observations_germany/climate/daily/kl";
 
 /// Column indices in DWD CSV format
 #[derive(Debug, Clone, Copy)]
@@ -21,22 +22,22 @@ const DWD_BASE_URL: &str = "https://opendata.dwd.de/climate_environment/CDC/obse
 struct DwdColumnIndices {
     station_id: usize,
     date: usize,
-    quality_wind: usize,      // QN_3
-    wind_gust: usize,         // FX - max wind gust m/s
-    wind_speed: usize,        // FM - mean wind speed m/s
-    quality_other: usize,     // QN_4
-    precipitation: usize,     // RSK - daily precipitation mm
-    precip_form: usize,       // RSKF - precipitation form
-    sunshine: usize,          // SDK - sunshine hours
-    snow_depth: usize,        // SHK_TAG - snow depth cm
-    cloud_cover: usize,       // NM - cloud cover 1/8
-    vapor_pressure: usize,    // VPM - vapor pressure hPa
-    air_pressure: usize,      // PM - air pressure hPa
-    temp_mean: usize,         // TMK - mean temp °C
-    humidity: usize,          // UPM - relative humidity %
-    temp_max: usize,          // TXK - max temp °C
-    temp_min: usize,          // TNK - min temp °C
-    temp_ground_min: usize,   // TGK - ground min temp °C
+    quality_wind: usize,    // QN_3
+    wind_gust: usize,       // FX - max wind gust m/s
+    wind_speed: usize,      // FM - mean wind speed m/s
+    quality_other: usize,   // QN_4
+    precipitation: usize,   // RSK - daily precipitation mm
+    precip_form: usize,     // RSKF - precipitation form
+    sunshine: usize,        // SDK - sunshine hours
+    snow_depth: usize,      // SHK_TAG - snow depth cm
+    cloud_cover: usize,     // NM - cloud cover 1/8
+    vapor_pressure: usize,  // VPM - vapor pressure hPa
+    air_pressure: usize,    // PM - air pressure hPa
+    temp_mean: usize,       // TMK - mean temp °C
+    humidity: usize,        // UPM - relative humidity %
+    temp_max: usize,        // TXK - max temp °C
+    temp_min: usize,        // TNK - min temp °C
+    temp_ground_min: usize, // TGK - ground min temp °C
 }
 
 impl Default for DwdColumnIndices {
@@ -85,7 +86,11 @@ impl DwdFetcher {
     }
 
     /// Parse DWD CSV data from a reader
-    pub fn parse_csv<R: BufRead>(&self, reader: R, station_name: Option<&str>) -> Result<Vec<DailyWeather>> {
+    pub fn parse_csv<R: BufRead>(
+        &self,
+        reader: R,
+        station_name: Option<&str>,
+    ) -> Result<Vec<DailyWeather>> {
         let indices = DwdColumnIndices::default();
         let mut records = Vec::new();
 
@@ -200,14 +205,16 @@ impl DwdFetcher {
     /// Build URL for downloading recent station data
     pub fn build_recent_url(&self, station_id: &str) -> String {
         let id = format!("{:0>5}", station_id);
-        format!(
-            "{}/recent/tageswerte_KL_{}_akt.zip",
-            DWD_BASE_URL, id
-        )
+        format!("{}/recent/tageswerte_KL_{}_akt.zip", DWD_BASE_URL, id)
     }
 
     /// Build URL for downloading historical station data
-    pub fn build_historical_url(&self, station_id: &str, start_date: &str, end_date: &str) -> String {
+    pub fn build_historical_url(
+        &self,
+        station_id: &str,
+        start_date: &str,
+        end_date: &str,
+    ) -> String {
         let id = format!("{:0>5}", station_id);
         format!(
             "{}/historical/tageswerte_KL_{}_{}_{}hist.zip",
@@ -218,7 +225,6 @@ impl DwdFetcher {
     /// Fetch recent data for a station (async)
     #[cfg(feature = "async")]
     pub async fn fetch_recent(&self, station: &WeatherStation) -> Result<Vec<DailyWeather>> {
-        
         use std::time::Duration;
 
         let url = self.build_recent_url(&station.id);
@@ -288,19 +294,21 @@ impl DwdFetcher {
         use std::io::Cursor;
 
         let cursor = Cursor::new(data);
-        let mut archive = zip::ZipArchive::new(cursor)
-            .map_err(|e| AppError::Storage(std::io::Error::new(
+        let mut archive = zip::ZipArchive::new(cursor).map_err(|e| {
+            AppError::Storage(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 format!("Invalid ZIP: {}", e),
-            )))?;
+            ))
+        })?;
 
         // Find the produkt_*.txt file
         for i in 0..archive.len() {
-            let mut file = archive.by_index(i)
-                .map_err(|e| AppError::Storage(std::io::Error::new(
+            let mut file = archive.by_index(i).map_err(|e| {
+                AppError::Storage(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
                     e.to_string(),
-                )))?;
+                ))
+            })?;
 
             let name = file.name().to_string();
             if name.starts_with("produkt_") && name.ends_with(".txt") {
@@ -378,7 +386,8 @@ impl WeatherStatistics {
         let temp_mean = temps.iter().sum::<f32>() / temps.len() as f32;
         let temp_min = temps.iter().copied().fold(f32::INFINITY, f32::min);
         let temp_max = temps.iter().copied().fold(f32::NEG_INFINITY, f32::max);
-        let variance = temps.iter().map(|t| (t - temp_mean).powi(2)).sum::<f32>() / temps.len() as f32;
+        let variance =
+            temps.iter().map(|t| (t - temp_mean).powi(2)).sum::<f32>() / temps.len() as f32;
         let temp_std_dev = variance.sqrt();
 
         // Humidity statistics
@@ -414,16 +423,10 @@ impl WeatherStatistics {
         };
 
         // Heating degree days (base 15°C - below this, heating is needed)
-        let heating_degree_days = temps
-            .iter()
-            .map(|t| (15.0 - t).max(0.0))
-            .sum();
+        let heating_degree_days = temps.iter().map(|t| (15.0 - t).max(0.0)).sum();
 
         // Cooling degree days (base 24°C - above this, cooling is needed)
-        let cooling_degree_days = temps
-            .iter()
-            .map(|t| (t - 24.0).max(0.0))
-            .sum();
+        let cooling_degree_days = temps.iter().map(|t| (t - 24.0).max(0.0)).sum();
 
         Some(Self {
             days: records.len(),

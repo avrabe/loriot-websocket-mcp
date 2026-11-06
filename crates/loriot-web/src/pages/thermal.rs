@@ -3,14 +3,13 @@
 //! Correlates indoor sensor data with outdoor weather to analyze
 //! building thermal performance and insulation quality.
 
-use leptos::prelude::*;
-use leptos::task::spawn_local;
 use crate::api::{
-    fetch_thermal_analysis, fetch_weather_info,
-    ThermalAnalysisReport, DeviceThermalAnalysis, DailyThermalProfile,
-    BuildingThermalMetrics, ThermalDataQuality, WeatherInfo,
+    fetch_thermal_analysis, fetch_weather_info, BuildingThermalMetrics, DailyThermalProfile,
+    DeviceThermalAnalysis, ThermalAnalysisReport, ThermalDataQuality, WeatherInfo,
 };
 use crate::components::Navbar;
+use leptos::prelude::*;
+use leptos::task::spawn_local;
 
 /// Thermal analysis page component
 #[component]
@@ -435,7 +434,10 @@ fn DeviceAnalysisList(
 #[component]
 fn DeviceDetailCard(device: DeviceThermalAnalysis) -> impl IntoView {
     let expanded = RwSignal::new(false);
-    let name = device.device_name.clone().unwrap_or_else(|| device.device_id.clone());
+    let name = device
+        .device_name
+        .clone()
+        .unwrap_or_else(|| device.device_id.clone());
 
     view! {
         <div class="collapse collapse-arrow bg-base-100">

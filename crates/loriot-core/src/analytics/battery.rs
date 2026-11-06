@@ -35,9 +35,7 @@ impl BatteryAnalyzer {
         }
 
         // Get latest reading
-        let latest = battery_readings
-            .iter()
-            .max_by_key(|r| r.ts)?;
+        let latest = battery_readings.iter().max_by_key(|r| r.ts)?;
 
         let current_voltage = latest.parsed_battery_voltage?;
         let current_status = latest
@@ -56,7 +54,8 @@ impl BatteryAnalyzer {
         let voltage_trend = Self::calculate_trend(&voltage_history);
 
         // Estimate remaining days (rough calculation)
-        let estimated_days_remaining = Self::estimate_days_remaining(&voltage_history, current_voltage);
+        let estimated_days_remaining =
+            Self::estimate_days_remaining(&voltage_history, current_voltage);
 
         Some(BatteryHealth {
             current_voltage,
@@ -84,8 +83,13 @@ impl BatteryAnalyzer {
 
         // Compare first and last 10% of readings
         let sample_size = (history.len() / 10).max(1);
-        let early_avg: f32 = history[..sample_size].iter().map(|(_, v)| v).sum::<f32>() / sample_size as f32;
-        let late_avg: f32 = history[history.len() - sample_size..].iter().map(|(_, v)| v).sum::<f32>() / sample_size as f32;
+        let early_avg: f32 =
+            history[..sample_size].iter().map(|(_, v)| v).sum::<f32>() / sample_size as f32;
+        let late_avg: f32 = history[history.len() - sample_size..]
+            .iter()
+            .map(|(_, v)| v)
+            .sum::<f32>()
+            / sample_size as f32;
 
         let diff = late_avg - early_avg;
 

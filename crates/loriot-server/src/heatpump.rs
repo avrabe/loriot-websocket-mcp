@@ -5,16 +5,14 @@ use axum::{
     http::StatusCode,
     Json,
 };
-use loriot_core::heatpump::{
-    HeatPumpAnalyzer, HeatPumpConfig, HeatPumpReport,
-};
+use loriot_core::heatpump::{HeatPumpAnalyzer, HeatPumpConfig, HeatPumpReport};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use crate::AppState;
 use crate::weather::SharedWeatherState;
+use crate::AppState;
 
 /// Heat pump service state
 pub struct HeatPumpState {
@@ -100,14 +98,11 @@ impl From<&HeatPumpConfig> for HeatPumpConfigResponse {
 }
 
 /// GET /api/heatpump/info - Get heat pump configuration info
-pub async fn get_heatpump_info(
-    State(state): State<CombinedHeatPumpState>,
-) -> Json<HeatPumpInfo> {
+pub async fn get_heatpump_info(State(state): State<CombinedHeatPumpState>) -> Json<HeatPumpInfo> {
     let hp = state.heatpump.read().await;
     let storage = state.app.storage.read().await;
 
-    let has_data = !hp.config.source_devices.is_empty()
-        && storage.reading_count() > 0;
+    let has_data = !hp.config.source_devices.is_empty() && storage.reading_count() > 0;
 
     Json(HeatPumpInfo {
         config: (&hp.config).into(),
@@ -135,8 +130,7 @@ pub async fn configure_heatpump(
     }
 
     let storage = state.app.storage.read().await;
-    let has_data = !hp.config.source_devices.is_empty()
-        && storage.reading_count() > 0;
+    let has_data = !hp.config.source_devices.is_empty() && storage.reading_count() > 0;
 
     Json(HeatPumpInfo {
         config: (&hp.config).into(),
@@ -169,10 +163,7 @@ pub async fn analyze_heatpump(
 
     // Get weather data
     let weather_records = weather.storage.read_all_from_disk().unwrap_or_default();
-    let weather_data: Vec<_> = weather_records
-        .iter()
-        .map(|r| r.weather.clone())
-        .collect();
+    let weather_data: Vec<_> = weather_records.iter().map(|r| r.weather.clone()).collect();
 
     // Run analysis
     let analyzer = HeatPumpAnalyzer::new(hp.config.clone());
@@ -193,7 +184,9 @@ pub async fn get_available_devices(
     let devices: Vec<DeviceOption> = stats
         .values()
         .map(|stat| {
-            let name = stat.device_name.clone()
+            let name = stat
+                .device_name
+                .clone()
                 .or_else(|| device_names.get(&stat.device_id).cloned())
                 .unwrap_or_else(|| stat.device_id.clone());
 

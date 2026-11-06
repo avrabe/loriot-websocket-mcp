@@ -1,10 +1,6 @@
 //! Energy tracking API handlers
 
-use axum::{
-    extract::State,
-    http::StatusCode,
-    Json,
-};
+use axum::{extract::State, http::StatusCode, Json};
 use loriot_core::energy::{
     analyze_scenario, monthly_breakdown, ApartmentUnit, BuildingProfile, CostDistributionSettings,
     DataSource, EnergyData, EnergyPrices, HeatingScenario, MonthlyConsumption, MonthlyScenario,
@@ -157,9 +153,7 @@ pub struct CostDistributionSettingsRequest {
 // ============================================================================
 
 /// GET /api/energy/overview - Get energy overview
-pub async fn get_overview(
-    State(state): State<SharedEnergyState>,
-) -> Json<EnergyOverview> {
+pub async fn get_overview(State(state): State<SharedEnergyState>) -> Json<EnergyOverview> {
     let energy = state.read().await;
     let data = &energy.data;
 
@@ -169,10 +163,7 @@ pub async fn get_overview(
     let yearly_totals: Vec<YearlyTotal> = available_years
         .iter()
         .map(|&year| {
-            let months: Vec<_> = data.consumption
-                .iter()
-                .filter(|c| c.year == year)
-                .collect();
+            let months: Vec<_> = data.consumption.iter().filter(|c| c.year == year).collect();
 
             YearlyTotal {
                 year,
@@ -197,9 +188,7 @@ pub async fn get_overview(
 }
 
 /// GET /api/energy/consumption - Get all consumption data
-pub async fn get_consumption(
-    State(state): State<SharedEnergyState>,
-) -> Json<ConsumptionResponse> {
+pub async fn get_consumption(State(state): State<SharedEnergyState>) -> Json<ConsumptionResponse> {
     let energy = state.read().await;
     Json(ConsumptionResponse {
         consumption: energy.data.consumption.clone(),
@@ -287,16 +276,18 @@ pub async fn update_apartments(
     let mut energy = state.write().await;
 
     // Convert request to ApartmentUnit
-    energy.data.apartments = request.apartments.into_iter().map(|a| {
-        ApartmentUnit {
+    energy.data.apartments = request
+        .apartments
+        .into_iter()
+        .map(|a| ApartmentUnit {
             id: a.id,
             name: a.name,
             area_m2: a.area_m2,
             distribution_units: a.distribution_units,
             is_reference: a.is_reference,
             notes: a.notes,
-        }
-    }).collect();
+        })
+        .collect();
 
     energy.data.cost_distribution = CostDistributionSettings {
         base_cost_percent: request.cost_distribution.base_cost_percent,
@@ -385,9 +376,9 @@ pub async fn get_scenarios(
     let data = &energy.data;
 
     // Use specified year or latest year with data
-    let year = query.year.unwrap_or_else(|| {
-        data.available_years().last().copied().unwrap_or(2024)
-    });
+    let year = query
+        .year
+        .unwrap_or_else(|| data.available_years().last().copied().unwrap_or(2024));
 
     // TODO: Get source temps from sensor data
     let source_temps: Option<&[(u32, f32)]> = None;

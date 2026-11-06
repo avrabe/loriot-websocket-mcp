@@ -3,14 +3,13 @@
 //! Displays weather forecast combined with room temperature predictions
 //! based on thermal analysis of historical sensor data.
 
-use leptos::prelude::*;
-use leptos::task::spawn_local;
 use crate::api::{
-    fetch_room_forecast, fetch_weather_info,
-    ForecastResponse, RoomForecast, DailyForecastSummary,
+    fetch_room_forecast, fetch_weather_info, DailyForecastSummary, ForecastResponse, RoomForecast,
     ThermalModel, WeatherInfo,
 };
 use crate::components::Navbar;
+use leptos::prelude::*;
+use leptos::task::spawn_local;
 
 /// Forecast page component
 #[component]
@@ -173,22 +172,29 @@ pub fn ForecastPage() -> impl IntoView {
 
 /// Summary statistics cards
 #[component]
-fn ForecastSummaryStats(weather: Vec<DailyForecastSummary>, rooms: Vec<RoomForecast>) -> impl IntoView {
+fn ForecastSummaryStats(
+    weather: Vec<DailyForecastSummary>,
+    rooms: Vec<RoomForecast>,
+) -> impl IntoView {
     // Calculate summary stats
     let outdoor_min = weather.iter().map(|d| d.temp_min).fold(f32::MAX, f32::min);
     let outdoor_max = weather.iter().map(|d| d.temp_max).fold(f32::MIN, f32::max);
     let outdoor_avg = if !weather.is_empty() {
         weather.iter().map(|d| d.temp_mean).sum::<f32>() / weather.len() as f32
-    } else { 0.0 };
+    } else {
+        0.0
+    };
 
     let precip_total = weather.iter().map(|d| d.precipitation).sum::<f32>();
 
     // Room predictions summary
     let (room_min, room_max) = if !rooms.is_empty() {
-        let mins: Vec<f32> = rooms.iter()
+        let mins: Vec<f32> = rooms
+            .iter()
             .flat_map(|r| r.daily_predictions.iter().map(|p| p.predicted_range.0))
             .collect();
-        let maxs: Vec<f32> = rooms.iter()
+        let maxs: Vec<f32> = rooms
+            .iter()
             .flat_map(|r| r.daily_predictions.iter().map(|p| p.predicted_range.1))
             .collect();
         (
@@ -333,7 +339,10 @@ fn WeatherForecastTimeline(daily: Vec<DailyForecastSummary>) -> impl IntoView {
 /// Room forecast card with improved layout
 #[component]
 fn RoomForecastCard(room: RoomForecast) -> impl IntoView {
-    let name = room.device_name.clone().unwrap_or_else(|| room.device_id.clone());
+    let name = room
+        .device_name
+        .clone()
+        .unwrap_or_else(|| room.device_id.clone());
     let device_id = room.device_id.clone();
     let model = room.model.clone();
     let predictions = room.daily_predictions.clone();
@@ -341,7 +350,9 @@ fn RoomForecastCard(room: RoomForecast) -> impl IntoView {
     // Calculate average confidence
     let avg_confidence = if !predictions.is_empty() {
         predictions.iter().map(|p| p.confidence).sum::<f32>() / predictions.len() as f32
-    } else { 0.0 };
+    } else {
+        0.0
+    };
 
     view! {
         <div class="card bg-base-200">

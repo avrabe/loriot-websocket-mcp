@@ -32,7 +32,9 @@ pub mod thermal;
 pub mod weather;
 
 // Re-export commonly used types
-pub use analytics::{AnalyticsEngine, AnalyticsReport, DataGap, DataGapSeverity, format_timestamp, format_duration};
+pub use analytics::{
+    format_duration, format_timestamp, AnalyticsEngine, AnalyticsReport, DataGap, DataGapSeverity,
+};
 pub use sensors::{decode_lht65s_pir, SensorReading};
 pub use storage::{DeviceStats, StorageConfig, StorageManager};
 
@@ -142,14 +144,15 @@ pub fn load_device_names(file_path: &str) -> HashMap<String, String> {
 }
 
 /// Connection status for WebSocket
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub enum ConnectionStatus {
     Connected,
     Connecting,
     #[default]
     Disconnected,
-    Reconnecting { attempt: u32, max_attempts: u32 },
+    Reconnecting {
+        attempt: u32,
+        max_attempts: u32,
+    },
     Error(String),
 }
-

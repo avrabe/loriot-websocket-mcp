@@ -131,7 +131,9 @@ impl WeatherStorage {
         let mut records: Vec<_> = self
             .cache
             .values()
-            .filter(|r| r.weather.date.as_str() >= start_date && r.weather.date.as_str() <= end_date)
+            .filter(|r| {
+                r.weather.date.as_str() >= start_date && r.weather.date.as_str() <= end_date
+            })
             .collect();
         records.sort_by(|a, b| b.weather.date.cmp(&a.weather.date));
         records

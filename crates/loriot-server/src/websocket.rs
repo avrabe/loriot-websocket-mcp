@@ -117,7 +117,11 @@ pub async fn run_loriot_connection_with(state: AppState, cfg: LoriotClientConfig
 
         // A session that delivered data counts as healthy: start over at the
         // shortest delay. Otherwise back off further.
-        attempt = if received_data { 1 } else { attempt.saturating_add(1) };
+        attempt = if received_data {
+            1
+        } else {
+            attempt.saturating_add(1)
+        };
 
         let status = if attempt > MAX_RETRIES {
             ConnectionStatus::Error(format!(
@@ -290,11 +294,8 @@ mod tests {
     const DUMMY_TOKEN: &str = "dummy-test-token";
 
     fn test_state(name: &str) -> AppState {
-        let path = std::env::temp_dir().join(format!(
-            "loriot-test-{}-{}.jsonl",
-            name,
-            std::process::id()
-        ));
+        let path =
+            std::env::temp_dir().join(format!("loriot-test-{}-{}.jsonl", name, std::process::id()));
         let _ = std::fs::remove_file(&path);
         let storage = StorageManager::new(StorageConfig {
             file_path: path.to_string_lossy().into_owned(),
@@ -346,9 +347,7 @@ mod tests {
                 let Ok(mut ws) = accept_async(tcp).await else {
                     continue;
                 };
-                let _ = ws
-                    .send(Message::Text(r#"{"cmd":"noop"}"#.into()))
-                    .await;
+                let _ = ws.send(Message::Text(r#"{"cmd":"noop"}"#.into())).await;
                 match kind {
                     Upstream::GoSilent => held.push(tokio::spawn(async move {
                         let _ws = ws;
@@ -401,7 +400,10 @@ mod tests {
         // ideal 10 ms ticks while we waited.
         let expected = (elapsed.as_millis() / 10 / 4) as usize;
         let got = ticks.load(Ordering::SeqCst);
-        assert!(got >= expected, "runtime starved: {got} ticks, expected >= {expected}");
+        assert!(
+            got >= expected,
+            "runtime starved: {got} ticks, expected >= {expected}"
+        );
     }
 
     fn fast() -> LoriotClientConfig {

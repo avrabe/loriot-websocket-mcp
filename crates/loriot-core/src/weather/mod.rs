@@ -23,7 +23,10 @@ pub struct Coordinates {
 
 impl Coordinates {
     pub fn new(latitude: f64, longitude: f64) -> Self {
-        Self { latitude, longitude }
+        Self {
+            latitude,
+            longitude,
+        }
     }
 
     /// Calculate distance to another point using Haversine formula (in km)
@@ -90,14 +93,13 @@ impl DailyWeather {
 
     /// Get the best available temperature (mean, or average of max/min)
     pub fn best_temperature(&self) -> Option<f32> {
-        self.temp_mean.or_else(|| {
-            match (self.temp_max, self.temp_min) {
+        self.temp_mean
+            .or_else(|| match (self.temp_max, self.temp_min) {
                 (Some(max), Some(min)) => Some((max + min) / 2.0),
                 (Some(max), None) => Some(max),
                 (None, Some(min)) => Some(min),
                 (None, None) => None,
-            }
-        })
+            })
     }
 }
 

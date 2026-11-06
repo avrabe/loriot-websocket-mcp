@@ -85,10 +85,10 @@ pub struct DataGap {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum DataGapSeverity {
-    Minor,      // < 1 hour
-    Moderate,   // 1-6 hours  
-    Major,      // 6-24 hours
-    Critical,   // > 24 hours
+    Minor,    // < 1 hour
+    Moderate, // 1-6 hours
+    Major,    // 6-24 hours
+    Critical, // > 24 hours
 }
 
 impl DataGap {
@@ -118,10 +118,7 @@ impl AnalyticsEngine {
             return Self::empty_report(device_id);
         }
 
-        let device_name = readings
-            .first()
-            .and_then(|r| r.name.as_ref())
-            .cloned();
+        let device_name = readings.first().and_then(|r| r.name.as_ref()).cloned();
 
         let analysis_period = Self::calculate_analysis_period(readings);
         let environmental = environmental::EnvironmentalAnalyzer::analyze(readings);

@@ -4,21 +4,21 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 
 use crate::api::{
-    fetch_weather_history, fetch_weather_info, fetch_weather_statistics,
-    geocode_address, set_weather_location, fetch_dwd_data,
-    OutdoorSummary, WeatherInfo, WeatherStatistics, GeocodingResult,
+    fetch_dwd_data, fetch_weather_history, fetch_weather_info, fetch_weather_statistics,
+    geocode_address, set_weather_location, GeocodingResult, OutdoorSummary, WeatherInfo,
+    WeatherStatistics,
 };
-use crate::components::{DataPoint, DualLineChart, LineChart, ChartConfig, Navbar};
+use crate::components::{ChartConfig, DataPoint, DualLineChart, LineChart, Navbar};
 
 /// Available time periods for weather data
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum WeatherPeriod {
-    Week,      // 7 days
-    TwoWeeks,  // 14 days
-    Month,     // 30 days
-    Quarter,   // 90 days
-    Year,      // 365 days
-    All,       // All available data
+    Week,     // 7 days
+    TwoWeeks, // 14 days
+    Month,    // 30 days
+    Quarter,  // 90 days
+    Year,     // 365 days
+    All,      // All available data
 }
 
 impl WeatherPeriod {
@@ -229,9 +229,7 @@ pub fn WeatherPage() -> impl IntoView {
 
 /// Weather period selector component
 #[component]
-fn WeatherPeriodSelector(
-    selected: RwSignal<WeatherPeriod>,
-) -> impl IntoView {
+fn WeatherPeriodSelector(selected: RwSignal<WeatherPeriod>) -> impl IntoView {
     let periods = vec![
         WeatherPeriod::Week,
         WeatherPeriod::TwoWeeks,
@@ -602,10 +600,7 @@ fn WeatherCharts(history: RwSignal<Vec<OutdoorSummary>>) -> impl IntoView {
 
 /// Temperature range chart (min/max on same scale)
 #[component]
-fn TemperatureRangeChart(
-    min_data: Vec<DataPoint>,
-    max_data: Vec<DataPoint>,
-) -> impl IntoView {
+fn TemperatureRangeChart(min_data: Vec<DataPoint>, max_data: Vec<DataPoint>) -> impl IntoView {
     if min_data.len() < 2 && max_data.len() < 2 {
         return view! {
             <div class="flex items-center justify-center h-32 bg-base-200 rounded-lg">
@@ -642,7 +637,11 @@ fn TemperatureRangeChart(
     let temp_min = all_temps.iter().fold(f32::INFINITY, |a, &b| a.min(b));
     let temp_max = all_temps.iter().fold(f32::NEG_INFINITY, |a, &b| a.max(b));
     let temp_range_raw = temp_max - temp_min;
-    let temp_padding_val = if temp_range_raw > 0.0 { temp_range_raw * 0.1 } else { 5.0 };
+    let temp_padding_val = if temp_range_raw > 0.0 {
+        temp_range_raw * 0.1
+    } else {
+        5.0
+    };
     let temp_min = temp_min - temp_padding_val;
     let temp_max = temp_max + temp_padding_val;
     let temp_range = temp_max - temp_min;
@@ -944,17 +943,27 @@ fn WeatherHistoryTable(history: RwSignal<Vec<OutdoorSummary>>) -> impl IntoView 
 fn WeatherHistoryRow(record: OutdoorSummary) -> impl IntoView {
     let date = format_date(&record.date);
     let station = record.station_name.clone();
-    let temp_mean = record.temp_mean
+    let temp_mean = record
+        .temp_mean
         .map(|t| format!("{:.1}°C", t))
         .unwrap_or_else(|| "-".to_string());
-    let temp_range = format!("{} / {}",
-        record.temp_min.map(|t| format!("{:.1}°C", t)).unwrap_or_else(|| "-".to_string()),
-        record.temp_max.map(|t| format!("{:.1}°C", t)).unwrap_or_else(|| "-".to_string())
+    let temp_range = format!(
+        "{} / {}",
+        record
+            .temp_min
+            .map(|t| format!("{:.1}°C", t))
+            .unwrap_or_else(|| "-".to_string()),
+        record
+            .temp_max
+            .map(|t| format!("{:.1}°C", t))
+            .unwrap_or_else(|| "-".to_string())
     );
-    let humidity = record.humidity
+    let humidity = record
+        .humidity
         .map(|h| format!("{:.0}%", h))
         .unwrap_or_else(|| "-".to_string());
-    let precipitation = record.precipitation
+    let precipitation = record
+        .precipitation
         .map(|p| format!("{:.1} mm", p))
         .unwrap_or_else(|| "-".to_string());
 
@@ -973,12 +982,7 @@ fn WeatherHistoryRow(record: OutdoorSummary) -> impl IntoView {
 /// Format date from YYYYMMDD to readable format
 fn format_date(date: &str) -> String {
     if date.len() == 8 {
-        format!(
-            "{}-{}-{}",
-            &date[0..4],
-            &date[4..6],
-            &date[6..8]
-        )
+        format!("{}-{}-{}", &date[0..4], &date[4..6], &date[6..8])
     } else {
         date.to_string()
     }

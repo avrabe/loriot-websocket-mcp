@@ -1,8 +1,8 @@
 //! Sensor device card component
 
 use leptos::prelude::*;
-use loriot_core::DeviceStats;
 use loriot_core::current_timestamp_ms;
+use loriot_core::DeviceStats;
 
 /// Format seconds into human-readable countdown
 fn format_countdown(seconds: i64) -> String {

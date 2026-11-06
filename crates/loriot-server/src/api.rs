@@ -126,23 +126,24 @@ pub async fn get_device_readings(
     let storage = state.storage.read().await;
 
     // Use explicit time range if provided, otherwise use time_window
-    let readings: Vec<SensorReading> = if let (Some(start), Some(end)) = (query.start_ts, query.end_ts) {
-        storage
-            .get_readings_for_device(&eui)
-            .into_iter()
-            .filter(|r| r.ts >= start && r.ts <= end)
-            .cloned()
-            .collect()
-    } else {
-        let time_window = parse_time_window(query.time_window.as_deref());
-        let cutoff = time_window.get_cutoff_timestamp();
-        storage
-            .get_readings_for_device(&eui)
-            .into_iter()
-            .filter(|r| cutoff.map(|c| r.ts >= c).unwrap_or(true))
-            .cloned()
-            .collect()
-    };
+    let readings: Vec<SensorReading> =
+        if let (Some(start), Some(end)) = (query.start_ts, query.end_ts) {
+            storage
+                .get_readings_for_device(&eui)
+                .into_iter()
+                .filter(|r| r.ts >= start && r.ts <= end)
+                .cloned()
+                .collect()
+        } else {
+            let time_window = parse_time_window(query.time_window.as_deref());
+            let cutoff = time_window.get_cutoff_timestamp();
+            storage
+                .get_readings_for_device(&eui)
+                .into_iter()
+                .filter(|r| cutoff.map(|c| r.ts >= c).unwrap_or(true))
+                .cloned()
+                .collect()
+        };
 
     Json(readings)
 }
@@ -220,10 +221,7 @@ pub async fn get_analytics(
             .unwrap_or_default()
     };
 
-    let report = AnalyticsEngine::analyze_readings(
-        &readings.iter().collect::<Vec<_>>(),
-        None,
-    );
+    let report = AnalyticsEngine::analyze_readings(&readings.iter().collect::<Vec<_>>(), None);
     Json(report)
 }
 
@@ -249,9 +247,7 @@ pub async fn get_device_analytics(
             .unwrap_or_default()
     };
 
-    let report = AnalyticsEngine::analyze_readings(
-        &readings.iter().collect::<Vec<_>>(),
-        Some(&eui),
-    );
+    let report =
+        AnalyticsEngine::analyze_readings(&readings.iter().collect::<Vec<_>>(), Some(&eui));
     Json(report)
 }

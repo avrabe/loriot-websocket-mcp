@@ -100,10 +100,7 @@ impl AnomalyDetector {
                         } else {
                             Severity::Medium
                         },
-                        description: format!(
-                            "Temperature {:.1}°C exceeds normal range",
-                            temp
-                        ),
+                        description: format!("Temperature {:.1}°C exceeds normal range", temp),
                         value: Some(temp),
                         expected_range: Some((lower_bound, upper_bound)),
                     });
@@ -117,10 +114,7 @@ impl AnomalyDetector {
                         } else {
                             Severity::Medium
                         },
-                        description: format!(
-                            "Temperature {:.1}°C below normal range",
-                            temp
-                        ),
+                        description: format!("Temperature {:.1}°C below normal range", temp),
                         value: Some(temp),
                         expected_range: Some((lower_bound, upper_bound)),
                     });

@@ -1,22 +1,31 @@
 //! Energy Tracker Page - WEG Heating Analysis
 
-use leptos::prelude::*;
-use leptos::task::spawn_local;
 use crate::api::{
-    fetch_energy_overview, fetch_energy_scenarios, fetch_energy_consumption,
-    update_energy_building, update_energy_prices, add_energy_consumption,
-    delete_energy_consumption, update_energy_apartments,
-    ApartmentUnit, CostDistributionSettings, UpdateApartmentsRequest,
-    EnergyOverview, ScenarioComparison, ScenarioAnalysis, MonthlyConsumption,
-    MonthlyScenario, UpdateBuildingRequest, UpdatePricesRequest, AddConsumptionRequest,
-    DeleteConsumptionRequest, YearlyTotal,
+    add_energy_consumption, delete_energy_consumption, fetch_energy_consumption,
+    fetch_energy_overview, fetch_energy_scenarios, update_energy_apartments,
+    update_energy_building, update_energy_prices, AddConsumptionRequest, ApartmentUnit,
+    CostDistributionSettings, DeleteConsumptionRequest, EnergyOverview, MonthlyConsumption,
+    MonthlyScenario, ScenarioAnalysis, ScenarioComparison, UpdateApartmentsRequest,
+    UpdateBuildingRequest, UpdatePricesRequest, YearlyTotal,
 };
 use crate::components::Navbar;
+use leptos::prelude::*;
+use leptos::task::spawn_local;
 
 /// Month names in German
 const MONTH_NAMES: [&str; 12] = [
-    "Januar", "Februar", "März", "April", "Mai", "Juni",
-    "Juli", "August", "September", "Oktober", "November", "Dezember"
+    "Januar",
+    "Februar",
+    "März",
+    "April",
+    "Mai",
+    "Juni",
+    "Juli",
+    "August",
+    "September",
+    "Oktober",
+    "November",
+    "Dezember",
 ];
 
 /// Energy Tracker page component
@@ -548,11 +557,15 @@ fn MonthlyDataCard(
 ) -> impl IntoView {
     let filtered = Signal::derive(move || {
         let year = selected_year.get();
-        let mut data: Vec<_> = consumption.get().into_iter()
+        let mut data: Vec<_> = consumption
+            .get()
+            .into_iter()
             .filter(|c| year.is_none_or(|y| c.year == y))
             .collect();
         data.sort_by(|a, b| {
-            a.year.cmp(&b.year).reverse()
+            a.year
+                .cmp(&b.year)
+                .reverse()
                 .then(a.month.cmp(&b.month).reverse())
         });
         data
@@ -642,7 +655,8 @@ fn MonthlyChartCard(monthly: Vec<MonthlyScenario>) -> impl IntoView {
     }
 
     // Find max cost for scaling
-    let max_cost = monthly.iter()
+    let max_cost = monthly
+        .iter()
         .map(|m| m.cost_current_eur.max(m.cost_hp_eur))
         .fold(0.0f64, |a, b| a.max(b));
 
@@ -738,7 +752,11 @@ fn BuildingModal(
             year_built: year_built.get().parse().unwrap_or(0),
             heating_system: heating_system.get(),
             distribution: distribution.get(),
-            notes: if notes.get().is_empty() { None } else { Some(notes.get()) },
+            notes: if notes.get().is_empty() {
+                None
+            } else {
+                Some(notes.get())
+            },
         };
 
         spawn_local(async move {
@@ -938,10 +956,7 @@ fn PricesModal(
 
 /// Add consumption modal
 #[component]
-fn ConsumptionModal(
-    show: RwSignal<bool>,
-    on_save: impl Fn(()) + 'static + Copy,
-) -> impl IntoView {
+fn ConsumptionModal(show: RwSignal<bool>, on_save: impl Fn(()) + 'static + Copy) -> impl IntoView {
     let year = RwSignal::new(2024u32);
     let month = RwSignal::new(1u32);
     let heating = RwSignal::new(String::new());
@@ -1073,7 +1088,10 @@ fn ExportModal(
     let export_text = Signal::derive(move || {
         let mut lines = Vec::new();
         lines.push("=== Energie-Analyse Export ===".to_string());
-        lines.push(format!("Erstellt: {}", chrono::Local::now().format("%Y-%m-%d %H:%M")));
+        lines.push(format!(
+            "Erstellt: {}",
+            chrono::Local::now().format("%Y-%m-%d %H:%M")
+        ));
         lines.push(String::new());
 
         if let Some(o) = overview.get() {
@@ -1081,14 +1099,23 @@ fn ExportModal(
             lines.push(format!("Fläche: {} m²", o.building.area_m2));
             lines.push(format!("Einheiten: {}", o.building.units));
             lines.push(format!("Baujahr: {}", o.building.year_built));
-            lines.push(format!("Heizung: {}", format_heating_system(&o.building.heating_system)));
-            lines.push(format!("Verteilung: {}", format_distribution(&o.building.distribution)));
+            lines.push(format!(
+                "Heizung: {}",
+                format_heating_system(&o.building.heating_system)
+            ));
+            lines.push(format!(
+                "Verteilung: {}",
+                format_distribution(&o.building.distribution)
+            ));
             lines.push(String::new());
 
             lines.push("--- Energiepreise ---".to_string());
             lines.push(format!("Gas: {:.2} ct/kWh", o.prices.gas_ct_kwh));
             lines.push(format!("Strom: {:.2} ct/kWh", o.prices.electricity_ct_kwh));
-            lines.push(format!("WP-Tarif: {:.2} ct/kWh", o.prices.electricity_hp_ct_kwh));
+            lines.push(format!(
+                "WP-Tarif: {:.2} ct/kWh",
+                o.prices.electricity_hp_ct_kwh
+            ));
             lines.push(String::new());
         }
 
@@ -1096,9 +1123,16 @@ fn ExportModal(
             lines.push(format!("--- Szenarienvergleich {} ---", s.year));
             lines.push(String::new());
 
-            for (name, scenario) in [("Gas aktuell", &s.current), ("Hybrid WP", &s.hybrid), ("Voll WP", &s.full_hp)] {
+            for (name, scenario) in [
+                ("Gas aktuell", &s.current),
+                ("Hybrid WP", &s.hybrid),
+                ("Voll WP", &s.full_hp),
+            ] {
                 lines.push(format!("{}:", name));
-                lines.push(format!("  Jahreskosten: {:.0} EUR", scenario.annual_cost_eur));
+                lines.push(format!(
+                    "  Jahreskosten: {:.0} EUR",
+                    scenario.annual_cost_eur
+                ));
                 lines.push(format!("  CO2-Emission: {:.0} kg", scenario.annual_co2_kg));
                 lines.push(format!("  Durchschn. COP: {:.1}", scenario.avg_cop));
                 lines.push(format!("  WP-Anteil: {:.0}%", scenario.hp_share * 100.0));
@@ -1107,10 +1141,16 @@ fn ExportModal(
 
             let savings = (s.current.annual_cost_eur - s.hybrid.annual_cost_eur).max(0.0);
             let savings_full = (s.current.annual_cost_eur - s.full_hp.annual_cost_eur).max(0.0);
-            lines.push(format!("Einsparung Hybrid: {:.0} EUR/Jahr ({:.1}%)",
-                savings, savings / s.current.annual_cost_eur * 100.0));
-            lines.push(format!("Einsparung Voll WP: {:.0} EUR/Jahr ({:.1}%)",
-                savings_full, savings_full / s.current.annual_cost_eur * 100.0));
+            lines.push(format!(
+                "Einsparung Hybrid: {:.0} EUR/Jahr ({:.1}%)",
+                savings,
+                savings / s.current.annual_cost_eur * 100.0
+            ));
+            lines.push(format!(
+                "Einsparung Voll WP: {:.0} EUR/Jahr ({:.1}%)",
+                savings_full,
+                savings_full / s.current.annual_cost_eur * 100.0
+            ));
             lines.push(String::new());
         }
 
@@ -1120,9 +1160,14 @@ fn ExportModal(
             lines.push("Jahr;Monat;Heizung kWh;Warmwasser kWh;Gesamt kWh".to_string());
             for c in data {
                 let month_name = MONTH_NAMES.get((c.month - 1) as usize).unwrap_or(&"?");
-                lines.push(format!("{};{};{:.1};{:.1};{:.1}",
-                    c.year, month_name, c.heating_kwh, c.hot_water_kwh,
-                    c.heating_kwh + c.hot_water_kwh));
+                lines.push(format!(
+                    "{};{};{:.1};{:.1};{:.1}",
+                    c.year,
+                    month_name,
+                    c.heating_kwh,
+                    c.hot_water_kwh,
+                    c.heating_kwh + c.hot_water_kwh
+                ));
             }
         }
 
@@ -1229,14 +1274,17 @@ fn ApartmentsModal(
 
         spawn_local(async move {
             let request = UpdateApartmentsRequest {
-                apartments: apts.into_iter().map(|a| crate::api::ApartmentUnit {
-                    id: a.id,
-                    name: a.name,
-                    area_m2: a.area_m2,
-                    distribution_units: a.distribution_units,
-                    is_reference: a.is_reference,
-                    notes: a.notes,
-                }).collect(),
+                apartments: apts
+                    .into_iter()
+                    .map(|a| crate::api::ApartmentUnit {
+                        id: a.id,
+                        name: a.name,
+                        area_m2: a.area_m2,
+                        distribution_units: a.distribution_units,
+                        is_reference: a.is_reference,
+                        notes: a.notes,
+                    })
+                    .collect(),
                 cost_distribution: CostDistributionSettings {
                     base_cost_percent: base_pct,
                 },
@@ -1249,12 +1297,15 @@ fn ApartmentsModal(
     };
 
     // Calculate totals for preview
-    let total_area = Signal::derive(move || {
-        apartments.get().iter().map(|a| a.area_m2).sum::<f64>()
-    });
+    let total_area =
+        Signal::derive(move || apartments.get().iter().map(|a| a.area_m2).sum::<f64>());
 
     let total_units = Signal::derive(move || {
-        apartments.get().iter().map(|a| a.distribution_units).sum::<f64>()
+        apartments
+            .get()
+            .iter()
+            .map(|a| a.distribution_units)
+            .sum::<f64>()
     });
 
     view! {

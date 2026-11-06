@@ -34,7 +34,10 @@ pub fn Navbar() -> impl IntoView {
                         set_status_color.set("badge-error".to_string());
                         set_status_icon.set("bg-error".to_string());
                     }
-                    ConnectionStatus::Reconnecting { attempt, max_attempts } => {
+                    ConnectionStatus::Reconnecting {
+                        attempt,
+                        max_attempts,
+                    } => {
                         set_status_text.set(format!("Reconnecting ({}/{})", attempt, max_attempts));
                         set_status_color.set("badge-warning".to_string());
                         set_status_icon.set("bg-warning".to_string());

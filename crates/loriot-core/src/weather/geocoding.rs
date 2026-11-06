@@ -111,7 +111,10 @@ impl GeocodingService {
             .json()
             .map_err(|e| AppError::Network(e.to_string()))?;
 
-        Ok(response.into_iter().filter_map(Self::parse_response).collect())
+        Ok(response
+            .into_iter()
+            .filter_map(Self::parse_response)
+            .collect())
     }
 
     /// Geocode an address to coordinates (async)
@@ -140,12 +143,18 @@ impl GeocodingService {
             .await
             .map_err(|e| AppError::Network(e.to_string()))?;
 
-        Ok(response.into_iter().filter_map(Self::parse_response).collect())
+        Ok(response
+            .into_iter()
+            .filter_map(Self::parse_response)
+            .collect())
     }
 
     /// Reverse geocode coordinates to address (blocking)
     #[cfg(feature = "blocking")]
-    pub fn reverse_geocode_blocking(&self, coords: &Coordinates) -> Result<Option<GeocodingResult>> {
+    pub fn reverse_geocode_blocking(
+        &self,
+        coords: &Coordinates,
+    ) -> Result<Option<GeocodingResult>> {
         use std::time::Duration;
 
         let url = format!(
@@ -201,17 +210,20 @@ impl GeocodingService {
         let latitude: f64 = response.lat.parse().ok()?;
         let longitude: f64 = response.lon.parse().ok()?;
 
-        let address = response.address.map(|a| AddressComponents {
-            house_number: a.house_number,
-            road: a.road,
-            suburb: a.suburb,
-            city: a.city.or(a.town).or(a.village),
-            county: a.county,
-            state: a.state,
-            postcode: a.postcode,
-            country: a.country,
-            country_code: a.country_code,
-        }).unwrap_or_default();
+        let address = response
+            .address
+            .map(|a| AddressComponents {
+                house_number: a.house_number,
+                road: a.road,
+                suburb: a.suburb,
+                city: a.city.or(a.town).or(a.village),
+                county: a.county,
+                state: a.state,
+                postcode: a.postcode,
+                country: a.country,
+                country_code: a.country_code,
+            })
+            .unwrap_or_default();
 
         let bounding_box = response.boundingbox.and_then(|bb| {
             if bb.len() == 4 {
@@ -280,7 +292,10 @@ mod tests {
     fn test_url_encoding() {
         assert_eq!(urlencoding::encode("Berlin"), "Berlin");
         // Note: urlencoding encodes comma as %2C and space as +
-        assert_eq!(urlencoding::encode("München, Germany"), "M%C3%BCnchen%2C+Germany");
+        assert_eq!(
+            urlencoding::encode("München, Germany"),
+            "M%C3%BCnchen%2C+Germany"
+        );
         assert_eq!(urlencoding::encode("123 Main St"), "123+Main+St");
     }
 

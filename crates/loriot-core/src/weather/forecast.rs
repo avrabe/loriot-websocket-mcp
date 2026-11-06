@@ -235,9 +235,21 @@ impl ForecastFetcher {
                         temperature: *temp,
                         humidity: *humidity,
                         precipitation: precip,
-                        cloud_cover: h.cloud_cover.as_ref().and_then(|v| v.get(i)).and_then(|v| *v),
-                        wind_speed: h.wind_speed_10m.as_ref().and_then(|v| v.get(i)).and_then(|v| *v),
-                        apparent_temperature: h.apparent_temperature.as_ref().and_then(|v| v.get(i)).and_then(|v| *v),
+                        cloud_cover: h
+                            .cloud_cover
+                            .as_ref()
+                            .and_then(|v| v.get(i))
+                            .and_then(|v| *v),
+                        wind_speed: h
+                            .wind_speed_10m
+                            .as_ref()
+                            .and_then(|v| v.get(i))
+                            .and_then(|v| *v),
+                        apparent_temperature: h
+                            .apparent_temperature
+                            .as_ref()
+                            .and_then(|v| v.get(i))
+                            .and_then(|v| *v),
                     })
                 })
                 .collect()
@@ -267,8 +279,10 @@ impl ForecastFetcher {
 
                     // Calculate mean and humidity from hourly
                     let (temp_mean, humidity) = if !day_hourly.is_empty() {
-                        let mean_temp = day_hourly.iter().map(|h| h.temperature).sum::<f32>() / day_hourly.len() as f32;
-                        let mean_humidity = day_hourly.iter().map(|h| h.humidity).sum::<f32>() / day_hourly.len() as f32;
+                        let mean_temp = day_hourly.iter().map(|h| h.temperature).sum::<f32>()
+                            / day_hourly.len() as f32;
+                        let mean_humidity = day_hourly.iter().map(|h| h.humidity).sum::<f32>()
+                            / day_hourly.len() as f32;
                         (mean_temp, mean_humidity)
                     } else {
                         ((*temp_max + *temp_min) / 2.0, 70.0)

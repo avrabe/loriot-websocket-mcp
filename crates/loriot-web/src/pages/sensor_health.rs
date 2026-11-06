@@ -1,5 +1,5 @@
-use leptos::prelude::*;
 use crate::components::Navbar;
+use leptos::prelude::*;
 
 #[component]
 pub fn SensorHealthPage() -> impl IntoView {

@@ -137,7 +137,10 @@ pub async fn get_room_predictions(
     let coords = weather_lock
         .location
         .unwrap_or_else(|| Coordinates::new(51.4818, 7.2162));
-    let weather_records = weather_lock.storage.read_all_from_disk().unwrap_or_default();
+    let weather_records = weather_lock
+        .storage
+        .read_all_from_disk()
+        .unwrap_or_default();
     let weather_data: Vec<_> = weather_records.iter().map(|r| r.weather.clone()).collect();
     drop(weather_lock);
 
@@ -154,13 +157,16 @@ pub async fn get_room_predictions(
 
     // Fetch weather forecast
     let fetcher = ForecastFetcher::new(days);
-    let forecast = fetcher.fetch(&coords).await.unwrap_or_else(|_| WeatherForecast {
-        coordinates: coords,
-        timezone: "Europe/Berlin".to_string(),
-        generation_time_ms: 0.0,
-        daily: vec![],
-        hourly: vec![],
-    });
+    let forecast = fetcher
+        .fetch(&coords)
+        .await
+        .unwrap_or_else(|_| WeatherForecast {
+            coordinates: coords,
+            timezone: "Europe/Berlin".to_string(),
+            generation_time_ms: 0.0,
+            daily: vec![],
+            hourly: vec![],
+        });
 
     // Generate room predictions for each analyzed device
     let rooms: Vec<RoomForecast> = thermal_report
@@ -215,7 +221,10 @@ pub async fn get_thermal_models(
 
     // Get weather data
     let weather_lock = state.weather.read().await;
-    let weather_records = weather_lock.storage.read_all_from_disk().unwrap_or_default();
+    let weather_records = weather_lock
+        .storage
+        .read_all_from_disk()
+        .unwrap_or_default();
     let weather_data: Vec<_> = weather_records.iter().map(|r| r.weather.clone()).collect();
     drop(weather_lock);
 

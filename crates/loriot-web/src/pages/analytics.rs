@@ -58,7 +58,11 @@ pub fn AnalyticsPage() -> impl IntoView {
             let query = if duration > 0 {
                 let end = now - (off as u64 * duration);
                 let start = end - duration;
-                leptos::logging::log!("Fetching analytics with time range: start={}, end={}", start, end);
+                leptos::logging::log!(
+                    "Fetching analytics with time range: start={}, end={}",
+                    start,
+                    end
+                );
                 AnalyticsQuery::new().with_time_range(start, end)
             } else {
                 leptos::logging::log!("Fetching analytics for All Time");
@@ -67,7 +71,10 @@ pub fn AnalyticsPage() -> impl IntoView {
 
             match fetch_analytics(None, query).await {
                 Ok(analytics) => {
-                    leptos::logging::log!("Analytics received: {} readings", analytics.analysis_period.total_readings);
+                    leptos::logging::log!(
+                        "Analytics received: {} readings",
+                        analytics.analysis_period.total_readings
+                    );
                     set_report.set(Some(analytics));
                 }
                 Err(e) => {
@@ -276,7 +283,7 @@ pub fn AnalyticsPage() -> impl IntoView {
                                                                 let start_time = format!("{}", gap.start_timestamp);
                                                                 let end_time = format!("{}", gap.end_timestamp);
                                                                 let duration = format!("{:.1} mins", gap.duration_minutes);
-                                                                
+
                                                                 view! {
                                                                     <tr>
                                                                         <td>
@@ -298,19 +305,19 @@ pub fn AnalyticsPage() -> impl IntoView {
                                                     <h3 class="font-semibold mb-2">"Gap Analysis Summary"</h3>
                                                     <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                                                         <div>
-                                                            <span class="font-semibold">"Total Gaps:"</span> 
+                                                            <span class="font-semibold">"Total Gaps:"</span>
                                                             <span>{gaps.len()}</span>
                                                         </div>
                                                         <div>
-                                                            <span class="font-semibold">"Total Missing Readings:"</span> 
+                                                            <span class="font-semibold">"Total Missing Readings:"</span>
                                                             <span>{gaps.iter().map(|g| g.expected_readings).sum::<usize>()}</span>
                                                         </div>
                                                         <div>
-                                                            <span class="font-semibold">"Longest Gap:"</span> 
+                                                            <span class="font-semibold">"Longest Gap:"</span>
                                                             <span>{format!("{:.1} mins", gaps.iter().map(|g| g.duration_minutes).fold(0.0, f64::max))}</span>
                                                         </div>
                                                         <div>
-                                                            <span class="font-semibold">"Critical Gaps:"</span> 
+                                                            <span class="font-semibold">"Critical Gaps:"</span>
                                                             <span>{gaps.iter().filter(|g| matches!(g.severity, DataGapSeverity::Critical)).count()}</span>
                                                         </div>
                                                     </div>

@@ -65,7 +65,10 @@ impl WeatherState {
         if let Err(e) = storage.load() {
             tracing::warn!("Failed to load weather data: {}", e);
         } else {
-            tracing::info!("Loaded {} weather records from storage", storage.total_count());
+            tracing::info!(
+                "Loaded {} weather records from storage",
+                storage.total_count()
+            );
         }
 
         // Load saved location
@@ -91,13 +94,13 @@ impl WeatherState {
                 })
             } else {
                 // Find nearest from defaults
-                get_default_stations()
-                    .into_iter()
-                    .min_by(|a, b| {
-                        let dist_a = a.coordinates.distance_to(&coords);
-                        let dist_b = b.coordinates.distance_to(&coords);
-                        dist_a.partial_cmp(&dist_b).unwrap_or(std::cmp::Ordering::Equal)
-                    })
+                get_default_stations().into_iter().min_by(|a, b| {
+                    let dist_a = a.coordinates.distance_to(&coords);
+                    let dist_b = b.coordinates.distance_to(&coords);
+                    dist_a
+                        .partial_cmp(&dist_b)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
             };
             (Some(coords), station)
         } else {
@@ -131,13 +134,13 @@ impl WeatherState {
         self.location = Some(coords);
         // Find nearest station from defaults (fallback for sync contexts)
         let default_stations = get_default_stations();
-        self.nearest_station = default_stations
-            .into_iter()
-            .min_by(|a, b| {
-                let dist_a = a.coordinates.distance_to(&coords);
-                let dist_b = b.coordinates.distance_to(&coords);
-                dist_a.partial_cmp(&dist_b).unwrap_or(std::cmp::Ordering::Equal)
-            });
+        self.nearest_station = default_stations.into_iter().min_by(|a, b| {
+            let dist_a = a.coordinates.distance_to(&coords);
+            let dist_b = b.coordinates.distance_to(&coords);
+            dist_a
+                .partial_cmp(&dist_b)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
     }
 }
 
@@ -264,16 +267,17 @@ pub struct StationWithDistance {
 }
 
 /// GET /api/weather/info - Get weather service info
-pub async fn get_weather_info(
-    State(state): State<SharedWeatherState>,
-) -> Json<WeatherInfo> {
+pub async fn get_weather_info(State(state): State<SharedWeatherState>) -> Json<WeatherInfo> {
     let weather = state.read().await;
 
     let (earliest_date, latest_date) = weather.storage.get_date_range();
     let current = weather.storage.get_latest().map(|r| r.weather.clone());
 
     let station_distance_km = weather.location.as_ref().and_then(|loc| {
-        weather.nearest_station.as_ref().map(|s| s.coordinates.distance_to(loc))
+        weather
+            .nearest_station
+            .as_ref()
+            .map(|s| s.coordinates.distance_to(loc))
     });
 
     Json(WeatherInfo {
@@ -334,16 +338,17 @@ pub async fn get_weather_statistics(
     let weather = state.read().await;
 
     // Get all records from disk for full statistics
-    let records = weather
-        .storage
-        .read_all_from_disk()
-        .unwrap_or_default();
+    let records = weather.storage.read_all_from_disk().unwrap_or_default();
 
     // Filter by date range if specified
-    let filtered: Vec<DailyWeather> = if let (Some(start), Some(end)) = (query.start_date, query.end_date) {
+    let filtered: Vec<DailyWeather> = if let (Some(start), Some(end)) =
+        (query.start_date, query.end_date)
+    {
         records
             .into_iter()
-            .filter(|r| r.weather.date.as_str() >= start.as_str() && r.weather.date.as_str() <= end.as_str())
+            .filter(|r| {
+                r.weather.date.as_str() >= start.as_str() && r.weather.date.as_str() <= end.as_str()
+            })
             .map(|r| r.weather)
             .collect()
     } else {
@@ -396,7 +401,8 @@ pub async fn get_stations(
     // Fallback to defaults if DWD fetch fails
     let all_stations = all_stations.unwrap_or_else(get_default_stations);
 
-    let stations: Vec<StationWithDistance> = if let (Some(lat), Some(lon)) = (query.lat, query.lon) {
+    let stations: Vec<StationWithDistance> = if let (Some(lat), Some(lon)) = (query.lat, query.lon)
+    {
         // Find nearest stations to coordinates
         let coords = Coordinates::new(lat, lon);
         let mut with_distance: Vec<_> = all_stations
@@ -461,7 +467,12 @@ pub async fn set_location(
     // Try to find nearest station from DWD list (async)
     let nearest_station = {
         let weather = state.read().await;
-        weather.station_fetcher.find_nearest(&coords).await.ok().flatten()
+        weather
+            .station_fetcher
+            .find_nearest(&coords)
+            .await
+            .ok()
+            .flatten()
     };
 
     // Update state and save to disk
@@ -473,13 +484,13 @@ pub async fn set_location(
         } else {
             // Fallback to hardcoded stations
             let default_stations = get_default_stations();
-            weather.nearest_station = default_stations
-                .into_iter()
-                .min_by(|a, b| {
-                    let dist_a = a.coordinates.distance_to(&coords);
-                    let dist_b = b.coordinates.distance_to(&coords);
-                    dist_a.partial_cmp(&dist_b).unwrap_or(std::cmp::Ordering::Equal)
-                });
+            weather.nearest_station = default_stations.into_iter().min_by(|a, b| {
+                let dist_a = a.coordinates.distance_to(&coords);
+                let dist_b = b.coordinates.distance_to(&coords);
+                dist_a
+                    .partial_cmp(&dist_b)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
         }
 
         // Save location to disk
@@ -496,7 +507,11 @@ pub async fn set_location(
                 "Saved location: {:.4}, {:.4} (station: {})",
                 request.latitude,
                 request.longitude,
-                weather.nearest_station.as_ref().map(|s| s.name.as_str()).unwrap_or("unknown")
+                weather
+                    .nearest_station
+                    .as_ref()
+                    .map(|s| s.name.as_str())
+                    .unwrap_or("unknown")
             );
         }
     }

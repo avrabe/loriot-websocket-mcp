@@ -60,11 +60,18 @@ pub fn LineChart(
     let min_ts = data.iter().map(|(t, _)| *t).min().unwrap_or(0);
     let max_ts = data.iter().map(|(t, _)| *t).max().unwrap_or(1);
     let min_val = data.iter().map(|(_, v)| *v).fold(f32::INFINITY, f32::min);
-    let max_val = data.iter().map(|(_, v)| *v).fold(f32::NEG_INFINITY, f32::max);
+    let max_val = data
+        .iter()
+        .map(|(_, v)| *v)
+        .fold(f32::NEG_INFINITY, f32::max);
 
     // Add some padding to value range
     let val_range = max_val - min_val;
-    let val_padding = if val_range > 0.0 { val_range * 0.1 } else { 1.0 };
+    let val_padding = if val_range > 0.0 {
+        val_range * 0.1
+    } else {
+        1.0
+    };
     let min_val = min_val - val_padding;
     let max_val = max_val + val_padding;
 

@@ -7,7 +7,10 @@ use leptos_router::{
     path,
 };
 
-use crate::pages::{AnalyticsPage, DashboardPage, DeviceDetailPage, EnergyPage, ForecastPage, HeatPumpPage, HistoryPage, SensorHealthPage, ThermalPage, WeatherPage};
+use crate::pages::{
+    AnalyticsPage, DashboardPage, DeviceDetailPage, EnergyPage, ForecastPage, HeatPumpPage,
+    HistoryPage, SensorHealthPage, ThermalPage, WeatherPage,
+};
 
 /// Main application component
 #[component]

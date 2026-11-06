@@ -31,10 +31,7 @@ fn generate_csv(readings: &[SensorReading]) -> String {
             .parsed_humidity
             .map(|h| format!("{:.1}", h))
             .unwrap_or_else(|| "-".to_string());
-        let battery = reading
-            .parsed_battery_status
-            .as_deref()
-            .unwrap_or("-");
+        let battery = reading.parsed_battery_status.as_deref().unwrap_or("-");
         let motion = if reading.parsed_activity.unwrap_or(false) {
             "Yes"
         } else {
@@ -123,7 +120,11 @@ pub fn HistoryPage() -> impl IntoView {
     let total_pages = Signal::derive(move || {
         let t = total.get();
         let ps = page_size.get();
-        if t == 0 { 1 } else { t.div_ceil(ps) }
+        if t == 0 {
+            1
+        } else {
+            t.div_ceil(ps)
+        }
     });
 
     let can_go_prev = Signal::derive(move || page.get() > 1);

@@ -155,10 +155,7 @@ async fn run() -> anyhow::Result<()> {
     let mut storage = StorageManager::new(storage_config);
     storage.load_existing_data()?;
 
-    tracing::info!(
-        "Loaded {} readings from storage",
-        storage.reading_count()
-    );
+    tracing::info!("Loaded {} readings from storage", storage.reading_count());
 
     // Load device names
     let device_names = config
@@ -171,7 +168,8 @@ async fn run() -> anyhow::Result<()> {
     let state = AppState::new(storage, device_names, config.clone());
 
     // Create weather state
-    let weather_state: weather::SharedWeatherState = Arc::new(RwLock::new(weather::WeatherState::new()));
+    let weather_state: weather::SharedWeatherState =
+        Arc::new(RwLock::new(weather::WeatherState::new()));
 
     // Set default location (Bochum area) if not configured
     {
@@ -180,7 +178,8 @@ async fn run() -> anyhow::Result<()> {
     }
 
     // Create heat pump state
-    let heatpump_state: heatpump::SharedHeatPumpState = Arc::new(RwLock::new(heatpump::HeatPumpState::new()));
+    let heatpump_state: heatpump::SharedHeatPumpState =
+        Arc::new(RwLock::new(heatpump::HeatPumpState::new()));
 
     // Create energy state
     let energy_state: energy::SharedEnergyState = Arc::new(RwLock::new(energy::EnergyState::new()));
@@ -322,9 +321,18 @@ mod tests {
 
     #[test]
     fn help_and_unknown_flags() {
-        assert!(matches!(parse_args(args(&["--help"])), Cli::Exit { code: 0, .. }));
-        assert!(matches!(parse_args(args(&["--bogus"])), Cli::Exit { code: 2, .. }));
-        assert!(matches!(parse_args(args(&["--version", "x"])), Cli::Exit { code: 2, .. }));
+        assert!(matches!(
+            parse_args(args(&["--help"])),
+            Cli::Exit { code: 0, .. }
+        ));
+        assert!(matches!(
+            parse_args(args(&["--bogus"])),
+            Cli::Exit { code: 2, .. }
+        ));
+        assert!(matches!(
+            parse_args(args(&["--version", "x"])),
+            Cli::Exit { code: 2, .. }
+        ));
         assert_eq!(parse_args(args(&[])), Cli::Run);
     }
 

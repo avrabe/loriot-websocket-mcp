@@ -309,7 +309,8 @@ impl EnergyData {
 
     /// Add or update monthly consumption
     pub fn set_month(&mut self, record: MonthlyConsumption) {
-        if let Some(existing) = self.consumption
+        if let Some(existing) = self
+            .consumption
             .iter_mut()
             .find(|c| c.year == record.year && c.month == record.month)
         {
@@ -318,9 +319,8 @@ impl EnergyData {
             self.consumption.push(record);
         }
         // Sort by date
-        self.consumption.sort_by(|a, b| {
-            (a.year, a.month).cmp(&(b.year, b.month))
-        });
+        self.consumption
+            .sort_by(|a, b| (a.year, a.month).cmp(&(b.year, b.month)));
         self.updated_at = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
@@ -329,7 +329,8 @@ impl EnergyData {
 
     /// Remove monthly consumption
     pub fn remove_month(&mut self, year: u32, month: u32) {
-        self.consumption.retain(|c| !(c.year == year && c.month == month));
+        self.consumption
+            .retain(|c| !(c.year == year && c.month == month));
         self.updated_at = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
@@ -338,10 +339,7 @@ impl EnergyData {
 
     /// Get available years
     pub fn available_years(&self) -> Vec<u32> {
-        let mut years: Vec<u32> = self.consumption
-            .iter()
-            .map(|c| c.year)
-            .collect();
+        let mut years: Vec<u32> = self.consumption.iter().map(|c| c.year).collect();
         years.sort();
         years.dedup();
         years
@@ -403,7 +401,8 @@ pub fn analyze_scenario(
     let boiler_efficiency = 0.9; // Gas boiler efficiency
 
     // Get yearly consumption
-    let total_consumption: f64 = data.consumption
+    let total_consumption: f64 = data
+        .consumption
         .iter()
         .filter(|c| c.year == year)
         .map(|c| c.total_kwh())
@@ -470,14 +469,18 @@ pub fn analyze_scenario(
                 }
             }
 
-            let avg_cop = if hp_heat > 0.0 { weighted_cop_sum / hp_heat } else { 4.0 };
+            let avg_cop = if hp_heat > 0.0 {
+                weighted_cop_sum / hp_heat
+            } else {
+                4.0
+            };
             let electricity_kwh = hp_heat / avg_cop;
             let gas_kwh = gas_heat / boiler_efficiency;
 
             let cost = electricity_kwh * prices.electricity_hp_ct_kwh / 100.0
-                     + gas_kwh * prices.gas_ct_kwh / 100.0;
-            let co2 = electricity_kwh * prices.co2_electricity_kg_kwh
-                    + gas_kwh * prices.co2_gas_kg_kwh;
+                + gas_kwh * prices.gas_ct_kwh / 100.0;
+            let co2 =
+                electricity_kwh * prices.co2_electricity_kg_kwh + gas_kwh * prices.co2_gas_kg_kwh;
 
             ScenarioAnalysis {
                 annual_cost_eur: cost,
@@ -557,7 +560,8 @@ pub fn monthly_breakdown(
             let hp_electricity = heat / cop as f64;
 
             // HP suitable if heating demand is low or it's transition season
-            let hp_suitable = record.heating_kwh < 800.0 || (record.month >= 4 && record.month <= 10);
+            let hp_suitable =
+                record.heating_kwh < 800.0 || (record.month >= 4 && record.month <= 10);
 
             let cost_current = record.total_kwh() * prices.gas_ct_kwh / 100.0;
             let cost_hp = hp_electricity * prices.electricity_hp_ct_kwh / 100.0;
@@ -599,27 +603,42 @@ pub fn calculate_cost_distribution(
     let base_cost = total_cost_eur * settings.base_cost_percent / 100.0;
     let consumption_cost = total_cost_eur * (100.0 - settings.base_cost_percent) / 100.0;
 
-    apartments.iter().map(|apt| {
-        let area_share = if total_area > 0.0 { apt.area_m2 / total_area * 100.0 } else { 0.0 };
-        let consumption_share = if total_units > 0.0 { apt.distribution_units / total_units * 100.0 } else { 0.0 };
+    apartments
+        .iter()
+        .map(|apt| {
+            let area_share = if total_area > 0.0 {
+                apt.area_m2 / total_area * 100.0
+            } else {
+                0.0
+            };
+            let consumption_share = if total_units > 0.0 {
+                apt.distribution_units / total_units * 100.0
+            } else {
+                0.0
+            };
 
-        let apt_base_cost = base_cost * area_share / 100.0;
-        let apt_consumption_cost = consumption_cost * consumption_share / 100.0;
-        let apt_total = apt_base_cost + apt_consumption_cost;
+            let apt_base_cost = base_cost * area_share / 100.0;
+            let apt_consumption_cost = consumption_cost * consumption_share / 100.0;
+            let apt_total = apt_base_cost + apt_consumption_cost;
 
-        ApartmentCostBreakdown {
-            apartment_id: apt.id,
-            name: apt.name.clone(),
-            area_m2: apt.area_m2,
-            area_share_percent: area_share,
-            distribution_units: apt.distribution_units,
-            consumption_share_percent: consumption_share,
-            base_cost_eur: apt_base_cost,
-            consumption_cost_eur: apt_consumption_cost,
-            total_cost_eur: apt_total,
-            cost_per_m2: if apt.area_m2 > 0.0 { apt_total / apt.area_m2 } else { 0.0 },
-        }
-    }).collect()
+            ApartmentCostBreakdown {
+                apartment_id: apt.id,
+                name: apt.name.clone(),
+                area_m2: apt.area_m2,
+                area_share_percent: area_share,
+                distribution_units: apt.distribution_units,
+                consumption_share_percent: consumption_share,
+                base_cost_eur: apt_base_cost,
+                consumption_cost_eur: apt_consumption_cost,
+                total_cost_eur: apt_total,
+                cost_per_m2: if apt.area_m2 > 0.0 {
+                    apt_total / apt.area_m2
+                } else {
+                    0.0
+                },
+            }
+        })
+        .collect()
 }
 
 /// Scale reference apartment consumption to building total based on area ratio

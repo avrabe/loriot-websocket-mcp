@@ -80,7 +80,11 @@ impl TrendAnalyzer {
             .iter()
             .map(|(x, y)| (y - (slope * x + intercept)).powi(2))
             .sum();
-        let r_squared = if ss_tot > 0.0 { 1.0 - ss_res / ss_tot } else { 0.0 };
+        let r_squared = if ss_tot > 0.0 {
+            1.0 - ss_res / ss_tot
+        } else {
+            0.0
+        };
 
         // Normalize slope to per-hour change
         let slope_per_hour = slope * (1000.0 * 60.0 * 60.0);

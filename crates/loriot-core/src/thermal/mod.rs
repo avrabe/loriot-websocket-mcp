@@ -195,10 +195,8 @@ impl ThermalAnalyzer {
         let readings_by_device_date = self.group_readings_by_device_date(readings);
 
         // Create weather lookup by date
-        let weather_by_date: HashMap<&str, &DailyWeather> = weather
-            .iter()
-            .map(|w| (w.date.as_str(), w))
-            .collect();
+        let weather_by_date: HashMap<&str, &DailyWeather> =
+            weather.iter().map(|w| (w.date.as_str(), w)).collect();
 
         // Analyze each device
         let mut device_analysis: Vec<DeviceThermalAnalysis> = Vec::new();
@@ -296,11 +294,9 @@ impl ThermalAnalyzer {
             // Match with weather data
             let weather = weather_by_date.get(date.as_str());
             let outdoor_temp = weather.and_then(|w| w.temp_mean);
-            let outdoor_range = weather.and_then(|w| {
-                match (w.temp_min, w.temp_max) {
-                    (Some(min), Some(max)) => Some((min, max)),
-                    _ => None,
-                }
+            let outdoor_range = weather.and_then(|w| match (w.temp_min, w.temp_max) {
+                (Some(min), Some(max)) => Some((min, max)),
+                _ => None,
             });
 
             if let Some(outdoor) = outdoor_temp {
@@ -348,7 +344,8 @@ impl ThermalAnalyzer {
         // Damping factor (how much the building dampens outdoor temperature swings)
         let damping_factor = if !indoor_swings.is_empty() && !outdoor_swings.is_empty() {
             let avg_indoor_swing = indoor_swings.iter().sum::<f32>() / indoor_swings.len() as f32;
-            let avg_outdoor_swing = outdoor_swings.iter().sum::<f32>() / outdoor_swings.len() as f32;
+            let avg_outdoor_swing =
+                outdoor_swings.iter().sum::<f32>() / outdoor_swings.len() as f32;
             if avg_outdoor_swing > 0.0 {
                 avg_indoor_swing / avg_outdoor_swing
             } else {
@@ -468,7 +465,8 @@ impl ThermalAnalyzer {
         let uniformity_score = if device_analysis.len() > 1 {
             let temps: Vec<f32> = device_analysis.iter().map(|d| d.avg_indoor_temp).collect();
             let mean = temps.iter().sum::<f32>() / temps.len() as f32;
-            let variance = temps.iter().map(|t| (t - mean).powi(2)).sum::<f32>() / temps.len() as f32;
+            let variance =
+                temps.iter().map(|t| (t - mean).powi(2)).sum::<f32>() / temps.len() as f32;
             let std_dev = variance.sqrt();
             // Lower std dev = higher uniformity (normalize to 0-1)
             (1.0 - std_dev / 5.0).clamp(0.0, 1.0)
@@ -570,15 +568,11 @@ impl ThermalAnalyzer {
         readings: &[SensorReading],
         weather: &[DailyWeather],
     ) -> AnalysisPeriod {
-        let reading_dates: std::collections::HashSet<String> = readings
-            .iter()
-            .map(|r| timestamp_to_date(r.ts))
-            .collect();
+        let reading_dates: std::collections::HashSet<String> =
+            readings.iter().map(|r| timestamp_to_date(r.ts)).collect();
 
-        let weather_dates: std::collections::HashSet<&str> = weather
-            .iter()
-            .map(|w| w.date.as_str())
-            .collect();
+        let weather_dates: std::collections::HashSet<&str> =
+            weather.iter().map(|w| w.date.as_str()).collect();
 
         let all_dates: std::collections::HashSet<&str> = reading_dates
             .iter()
@@ -629,7 +623,10 @@ impl ThermalAnalyzer {
         let devices_with_data = device_analysis.len();
         let weather_data_available = !weather.is_empty();
 
-        let quality_rating = if coverage_percent > 80.0 && avg_readings_per_day > 50.0 && weather_data_available {
+        let quality_rating = if coverage_percent > 80.0
+            && avg_readings_per_day > 50.0
+            && weather_data_available
+        {
             QualityRating::Excellent
         } else if coverage_percent > 60.0 && avg_readings_per_day > 30.0 && weather_data_available {
             QualityRating::Good
@@ -682,6 +679,9 @@ mod tests {
         let report = analyzer.analyze(&[], &[]);
 
         assert_eq!(report.device_analysis.len(), 0);
-        assert_eq!(report.building_metrics.insulation_rating, InsulationRating::Unknown);
+        assert_eq!(
+            report.building_metrics.insulation_rating,
+            InsulationRating::Unknown
+        );
     }
 }

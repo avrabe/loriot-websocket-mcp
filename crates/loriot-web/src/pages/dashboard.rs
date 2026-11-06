@@ -130,7 +130,9 @@ pub fn DashboardPage() -> impl IntoView {
             match fetch_readings(query).await {
                 Ok(result) => {
                     // Log the readings timestamps for debugging
-                    if let (Some(first), Some(last)) = (result.readings.first(), result.readings.last()) {
+                    if let (Some(first), Some(last)) =
+                        (result.readings.first(), result.readings.last())
+                    {
                         leptos::logging::log!(
                             "Readings: {} total, first ts={}, last ts={}",
                             result.readings.len(),
