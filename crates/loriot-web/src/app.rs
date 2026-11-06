@@ -29,7 +29,7 @@ pub fn App() -> impl IntoView {
                     <Route path=path!("/") view=DashboardPage />
                     <Route path=path!("/device/:eui") view=DeviceDetailPage />
                     <Route path=path!("/analytics") view=AnalyticsPage />
-                    <Route path=path!("/health") view=SensorHealthPage />
+                    <Route path=path!("/sensor-health") view=SensorHealthPage />
                     <Route path=path!("/history") view=HistoryPage />
                     <Route path=path!("/weather") view=WeatherPage />
                     <Route path=path!("/heatpump") view=HeatPumpPage />
