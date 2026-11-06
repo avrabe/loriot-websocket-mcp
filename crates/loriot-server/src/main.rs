@@ -289,7 +289,7 @@ async fn run() -> anyhow::Result<()> {
         .fallback_service(
             ServeDir::new("assets")
                 .append_index_html_on_directories(true)
-                .not_found_service(tower::service_fn(|_| async {
+                .fallback(tower::service_fn(|_| async {
                     // Serve index.html for SPA routes
                     match tokio::fs::read_to_string("assets/index.html").await {
                         Ok(html) => Ok((StatusCode::OK, Html(html)).into_response()),
