@@ -319,8 +319,7 @@ impl EnergyData {
             self.consumption.push(record);
         }
         // Sort by date
-        self.consumption
-            .sort_by(|a, b| (a.year, a.month).cmp(&(b.year, b.month)));
+        self.consumption.sort_by_key(|c| (c.year, c.month));
         self.updated_at = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
