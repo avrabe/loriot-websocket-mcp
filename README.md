@@ -263,22 +263,75 @@ devices.json         # Device name configuration (optional)
 sensor_history.jsonl # Data storage file (auto-created)
 ```
 
+## MCP Server Integration
+
+> **Not built at the moment.** `src/mcp_server.rs` (from main) is not part of
+> any crate in the Cargo workspace yet, so the commands below do not work until
+> it is ported to the workspace.
+
+This project now includes **Model Context Protocol (MCP) server support**, enabling AI assistants and external tools to access sensor data programmatically.
+
+### What is MCP?
+
+The Model Context Protocol (MCP) is a standardized protocol that allows AI assistants (like Claude) to securely connect to external data sources and tools. With MCP, you can query your sensor data through natural language or programmatic interfaces.
+
+### Available Tools
+
+The MCP server exposes the following tools:
+
+- **get_latest_readings** - Get the latest sensor readings from all devices (default: 10)
+- **list_devices** - List all known sensor devices with their basic information
+- **get_pir_events** - Get PIR motion detection events (default limit: 20)
+- **get_summary** - Get summary statistics across all devices
+
+### Running the MCP Server
+
+```bash
+# Build the MCP server
+cargo build --release --bin mcp_server
+
+# Run the MCP server (stdio transport)
+./target/release/mcp_server
+```
+
+The MCP server loads data from `sensor_history.jsonl` and responds to MCP protocol requests via standard input/output (stdio transport).
+
+### Integrating with Claude Desktop
+
+To use the MCP server with Claude Desktop, add it to your MCP settings configuration:
+
+```json
+{
+  "mcpServers": {
+    "loriot-sensor-data": {
+      "command": "/path/to/loriot-websocket-mcp/target/release/mcp_server",
+      "args": []
+    }
+  }
+}
+```
+
+After configuration, Claude can query your sensor data using natural language:
+- "Show me the latest readings from all sensors"
+- "What are the PIR motion events?"
+- "Give me a summary of all sensor data"
+
+### MCP Dependencies
+
+The MCP server uses:
+- **rmcp 0.8** - Official Rust SDK for Model Context Protocol
+- **schemars 1** - JSON Schema generation for tool parameters
+- **anyhow 1** - Error handling
+
 ## Future Roadmap
 
 ### Planned Features
-- **MCP (Model Context Protocol) integration** for external data access
 - **Additional sensor support** (temperature-only, GPS, etc.)
+- **Enhanced MCP tools** with filtering and time range queries
 - **Data export capabilities** (CSV, JSON, SQLite)
 - **Web dashboard** with remote monitoring
 - **Alert system** with configurable thresholds
 - **Historical data analysis** with trend detection
-
-### MCP Integration
-Future versions will expose sensor data via MCP, enabling:
-- **External tool access** to real-time and historical data
-- **Automated analysis** and reporting capabilities
-- **Integration with AI assistants** for intelligent monitoring
-- **Custom dashboards** and data visualization tools
 
 ## Contributing
 
