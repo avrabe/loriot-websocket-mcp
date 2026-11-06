@@ -37,8 +37,32 @@ struct CachedMessage {
     ts: u64,
 }
 
+/// Connection parameters for the Loriot client (a seam so tests can point the
+/// client at a local server with short timings).
+#[derive(Debug, Clone)]
+pub struct LoriotClientConfig {
+    pub url: String,
+    pub ping_interval: Duration,
+    pub pong_timeout: Duration,
+}
+
+impl Default for LoriotClientConfig {
+    fn default() -> Self {
+        Self {
+            url: LORIOT_WS_URL.to_string(),
+            ping_interval: PING_INTERVAL,
+            pong_timeout: PONG_TIMEOUT,
+        }
+    }
+}
+
 /// Run the Loriot WebSocket connection with automatic reconnection
 pub async fn run_loriot_connection(state: AppState) {
+    run_loriot_connection_with(state, LoriotClientConfig::default()).await
+}
+
+/// Run the Loriot WebSocket connection against `cfg` with automatic reconnection
+pub async fn run_loriot_connection_with(state: AppState, cfg: LoriotClientConfig) {
     let mut retry_count = 0;
 
     loop {
@@ -46,7 +70,7 @@ pub async fn run_loriot_connection(state: AppState) {
             .set_connection_status(ConnectionStatus::Connecting)
             .await;
 
-        match connect_to_loriot(&state).await {
+        match connect_to_loriot(&state, &cfg).await {
             Ok(()) => {
                 // Connection closed normally
                 retry_count = 0;
@@ -81,8 +105,11 @@ pub async fn run_loriot_connection(state: AppState) {
     }
 }
 
-async fn connect_to_loriot(state: &AppState) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let url = format!("{}?token={}", LORIOT_WS_URL, state.config.loriot_token);
+async fn connect_to_loriot(
+    state: &AppState,
+    cfg: &LoriotClientConfig,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let url = format!("{}?token={}", cfg.url, state.config.loriot_token);
 
     tracing::info!("Connecting to Loriot WebSocket...");
 
@@ -105,14 +132,14 @@ async fn connect_to_loriot(state: &AppState) -> Result<(), Box<dyn std::error::E
         .send(Message::Text(cache_query.to_string().into()))
         .await?;
 
-    let mut ping_interval = interval(PING_INTERVAL);
+    let mut ping_interval = interval(cfg.ping_interval);
 
     loop {
         tokio::select! {
             _ = ping_interval.tick() => {
                 write.send(Message::Ping(Bytes::new())).await?;
             }
-            msg = timeout(PONG_TIMEOUT, read.next()) => {
+            msg = timeout(cfg.pong_timeout, read.next()) => {
                 match msg {
                     Ok(Some(Ok(message))) => {
                         if let Err(e) = handle_message(state, message).await {
