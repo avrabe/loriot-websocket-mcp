@@ -45,6 +45,11 @@ jobs:
       - name: cargo clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
+      # loriot-core on its own, without the async/blocking HTTP features (as the
+      # wasm frontend uses it); the workspace run above unifies those features on.
+      - name: cargo clippy (loriot-core, no features)
+        run: cargo clippy -p loriot-core --all-targets --locked -- -D warnings
+
       - name: cargo test
         run: cargo test --workspace --locked
 
@@ -84,6 +89,9 @@ jobs:
           mkdir -p "$RUNNER_TEMP/trunk"
           tar -xzf "$RUNNER_TEMP/trunk.tar.gz" -C "$RUNNER_TEMP/trunk"
           echo "$RUNNER_TEMP/trunk" >> "$GITHUB_PATH"
+
+      - name: cargo clippy (loriot-web, wasm32)
+        run: cargo clippy -p loriot-web --target wasm32-unknown-unknown --locked -- -D warnings
 
       - name: trunk build --release
         working-directory: crates/loriot-web

@@ -4,6 +4,7 @@
 //! to predict indoor room temperatures.
 
 use super::{Coordinates, DailyWeather};
+#[cfg(any(feature = "async", feature = "blocking"))]
 use crate::{AppError, Result};
 use serde::{Deserialize, Serialize};
 
@@ -155,6 +156,7 @@ impl ThermalModel {
 }
 
 /// Open-Meteo API response structure
+#[cfg(any(feature = "async", feature = "blocking"))]
 #[derive(Debug, Deserialize)]
 struct OpenMeteoResponse {
     latitude: f64,
@@ -165,6 +167,7 @@ struct OpenMeteoResponse {
     daily: Option<OpenMeteoDaily>,
 }
 
+#[cfg(any(feature = "async", feature = "blocking"))]
 #[derive(Debug, Deserialize)]
 struct OpenMeteoHourly {
     time: Vec<String>,
@@ -176,6 +179,7 @@ struct OpenMeteoHourly {
     apparent_temperature: Option<Vec<Option<f32>>>,
 }
 
+#[cfg(any(feature = "async", feature = "blocking"))]
 #[derive(Debug, Deserialize)]
 struct OpenMeteoDaily {
     time: Vec<String>,
@@ -217,6 +221,7 @@ impl ForecastFetcher {
     }
 
     /// Parse Open-Meteo response into our forecast format
+    #[cfg(any(feature = "async", feature = "blocking"))]
     fn parse_response(&self, response: OpenMeteoResponse) -> Result<WeatherForecast> {
         let coords = Coordinates::new(response.latitude, response.longitude);
 

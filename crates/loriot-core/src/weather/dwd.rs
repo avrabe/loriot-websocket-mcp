@@ -6,10 +6,12 @@
 //! Data format is semicolon-separated CSV with these columns:
 //! STATIONS_ID;MESS_DATUM;QN_3;FX;FM;QN_4;RSK;RSKF;SDK;SHK_TAG;NM;VPM;PM;TMK;UPM;TXK;TNK;TGK;eor
 
-use super::{station::WeatherStation, DailyWeather};
+#[cfg(any(feature = "async", feature = "blocking"))]
+use super::station::WeatherStation;
+use super::DailyWeather;
 use crate::{AppError, Result};
 use serde::{Deserialize, Serialize};
-use std::io::{BufRead, Read};
+use std::io::BufRead;
 use std::path::Path;
 
 /// DWD Open Data base URL
@@ -292,6 +294,8 @@ impl DwdFetcher {
     #[cfg(any(feature = "async", feature = "blocking"))]
     fn parse_zip(&self, data: &[u8], station_name: Option<&str>) -> Result<Vec<DailyWeather>> {
         use std::io::Cursor;
+
+        use std::io::Read;
 
         let cursor = Cursor::new(data);
         let mut archive = zip::ZipArchive::new(cursor).map_err(|e| {
