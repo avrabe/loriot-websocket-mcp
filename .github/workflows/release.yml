@@ -1,0 +1,224 @@
+name: Release
+
+# Assets (PulseEngine release standard, the names smithy's fetch script checks):
+#   loriot-server-<ver>-linux-arm64    raw static binary, aarch64 musl (Raspberry Pi)
+#   loriot-server-<ver>-linux-amd64    raw static binary, x86_64 musl
+#   loriot-server-<ver>-darwin-arm64   raw binary, Apple silicon
+#   sbom.json                          CycloneDX SBOM of loriot-server
+#   SHA256SUMS.txt                     sha256 of all of the above
+#   SHA256SUMS.txt.cosign.bundle       keyless cosign signature over SHA256SUMS.txt
+# plus a GitHub build-provenance attestation for each binary.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  CARGO_TERM_COLOR: always
+  # Keep in step with ci.yml.
+  RUST_TOOLCHAIN: 1.96.1
+  CARGO_ZIGBUILD_VERSION: 0.24.1
+  CARGO_CYCLONEDX_VERSION: 0.5.9
+  TAG: ${{ github.ref_name }}
+
+# Release jobs sign and publish: GitHub-hosted runners only, and no caches.
+jobs:
+  version-guard:
+    name: Tag matches Cargo.toml version
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+
+      - name: Compare tag and crate version
+        run: |
+          crate="$(cargo metadata --no-deps --format-version 1 --locked \
+            | jq -r '.packages[] | select(.name == "loriot-server") | .version')"
+          if [ "v$crate" != "$TAG" ]; then
+            echo "::error::tag $TAG does not match loriot-server version $crate"
+            exit 1
+          fi
+
+  build:
+    name: Build ${{ matrix.asset }}
+    needs: version-guard
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            target: aarch64-unknown-linux-musl
+            asset: linux-arm64
+            zig: true
+            run: qemu-aarch64-static
+          - runner: ubuntu-24.04
+            target: x86_64-unknown-linux-musl
+            asset: linux-amd64
+            zig: true
+            run: ""
+          - runner: macos-14
+            target: aarch64-apple-darwin
+            asset: darwin-arm64
+            zig: false
+            run: ""
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: ${{ matrix.target }}
+
+      # cargo-zigbuild and zig from PyPI in a venv; with the venv first on PATH,
+      # cargo-zigbuild finds zig through the venv's python3 (ziglang module).
+      - name: Install cargo-zigbuild
+        if: matrix.zig
+        run: |
+          python3 -m venv "$RUNNER_TEMP/zig"
+          "$RUNNER_TEMP/zig/bin/pip" install --quiet "cargo-zigbuild==${CARGO_ZIGBUILD_VERSION}"
+          echo "$RUNNER_TEMP/zig/bin" >> "$GITHUB_PATH"
+
+      - name: Build (zigbuild)
+        if: matrix.zig
+        run: cargo zigbuild --locked --release -p loriot-server --target "${{ matrix.target }}"
+
+      - name: Build (native)
+        if: ${{ !matrix.zig }}
+        run: cargo build --locked --release -p loriot-server --target "${{ matrix.target }}"
+
+      - name: Install qemu-user (to run the arm64 binary)
+        if: matrix.run == 'qemu-aarch64-static'
+        run: sudo apt-get update -q && sudo apt-get install -y -q qemu-user-static
+
+      # Ask the artifact, not the manifest: the built binary must report the tag.
+      - name: Check binary --version equals tag
+        run: |
+          bin="target/${{ matrix.target }}/release/loriot-server"
+          got="$(${{ matrix.run }} "$bin" --version)"
+          if [ "$got" != "loriot-server ${TAG#v}" ]; then
+            echo "::error::binary reports '$got', expected 'loriot-server ${TAG#v}'"
+            exit 1
+          fi
+          ${{ matrix.run }} "$bin" --help > /dev/null
+
+      - name: Check linkage
+        if: matrix.zig
+        run: |
+          file "target/${{ matrix.target }}/release/loriot-server" | tee /dev/stderr | grep -q 'statically linked'
+
+      - name: Stage binary
+        run: |
+          mkdir -p dist
+          cp "target/${{ matrix.target }}/release/loriot-server" "dist/loriot-server-${TAG#v}-${{ matrix.asset }}"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: bin-${{ matrix.asset }}
+          path: dist/
+          if-no-files-found: error
+
+  sbom:
+    name: SBOM
+    needs: version-guard
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+
+      - name: Install cargo-cyclonedx
+        run: cargo install --locked --version "$CARGO_CYCLONEDX_VERSION" cargo-cyclonedx
+
+      - name: Generate SBOM
+        run: |
+          cargo cyclonedx --manifest-path crates/loriot-server/Cargo.toml \
+            --format json --spec-version 1.5 --override-filename sbom
+          mkdir -p dist
+          cp crates/loriot-server/sbom.json dist/sbom.json
+          test -s dist/sbom.json
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sbom
+          path: dist/sbom.json
+          if-no-files-found: error
+
+  publish:
+    name: Sum, sign, attest, release
+    needs: [build, sbom]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write       # create the release
+      id-token: write       # keyless cosign + attestation
+      attestations: write   # build provenance
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: dist/
+          merge-multiple: true
+
+      - name: Generate SHA256SUMS.txt
+        working-directory: dist
+        run: |
+          v="${TAG#v}"
+          for a in linux-arm64 linux-amd64 darwin-arm64; do
+            test -s "loriot-server-$v-$a"
+          done
+          test -s sbom.json
+          sha256sum loriot-server-* sbom.json > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/loriot-server-*
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+
+      - name: Sign SHA256SUMS.txt (keyless)
+        working-directory: dist
+        run: cosign sign-blob --yes --bundle SHA256SUMS.txt.cosign.bundle SHA256SUMS.txt
+
+      # The same check consumers run (README); fail before publishing if it does not pass.
+      - name: Verify signature
+        working-directory: dist
+        run: |
+          cosign verify-blob \
+            --certificate-identity-regexp '^https://github.com/avrabe/loriot-websocket-mcp/\.github/workflows/' \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            --bundle SHA256SUMS.txt.cosign.bundle SHA256SUMS.txt
+          sha256sum -c SHA256SUMS.txt
+
+      - name: Create GitHub release
+        working-directory: dist
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release create "$TAG" --verify-tag --title "loriot-server ${TAG#v}" --generate-notes \
+            loriot-server-* sbom.json SHA256SUMS.txt SHA256SUMS.txt.cosign.bundle
