@@ -53,7 +53,7 @@ Tags `v*` build these assets (`<ver>` without the `v`):
 
 - `loriot-server-<ver>-linux-arm64` (static, aarch64 musl, e.g. Raspberry Pi 4)
 - `loriot-server-<ver>-linux-amd64` (static, x86_64 musl)
-- `loriot-server-<ver>-darwin-arm64`
+- `loriot-server-<ver>-macos-arm64`
 - `sbom.json` (CycloneDX)
 - `SHA256SUMS.txt` and its keyless cosign signature `SHA256SUMS.txt.cosign.bundle`
 

@@ -3,7 +3,7 @@ name: Release
 # Assets (PulseEngine release standard, the names smithy's fetch script checks):
 #   loriot-server-<ver>-linux-arm64    raw static binary, aarch64 musl (Raspberry Pi)
 #   loriot-server-<ver>-linux-amd64    raw static binary, x86_64 musl
-#   loriot-server-<ver>-darwin-arm64   raw binary, Apple silicon
+#   loriot-server-<ver>-macos-arm64   raw binary, Apple silicon
 #   sbom.json                          CycloneDX SBOM of loriot-server
 #   SHA256SUMS.txt                     sha256 of all of the above
 #   SHA256SUMS.txt.cosign.bundle       keyless cosign signature over SHA256SUMS.txt
@@ -74,7 +74,7 @@ jobs:
             run: ""
           - runner: macos-14
             target: aarch64-apple-darwin
-            asset: darwin-arm64
+            asset: macos-arm64
             zig: false
             run: ""
     steps:
@@ -185,7 +185,7 @@ jobs:
         working-directory: dist
         run: |
           v="${TAG#v}"
-          for a in linux-arm64 linux-amd64 darwin-arm64; do
+          for a in linux-arm64 linux-amd64 macos-arm64; do
             test -s "loriot-server-$v-$a"
           done
           test -s sbom.json
