@@ -11,7 +11,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use crate::weather::SharedWeatherState;
+use crate::state::run_blocking;
+use crate::weather::{load_daily_weather, weather_history_path, SharedWeatherState};
 use crate::AppState;
 
 /// Heat pump service state
@@ -144,30 +145,26 @@ pub async fn analyze_heatpump(
     State(state): State<CombinedHeatPumpState>,
     Query(query): Query<HeatPumpQuery>,
 ) -> Result<Json<HeatPumpReport>, StatusCode> {
-    let hp = state.heatpump.read().await;
+    let config = state.heatpump.read().await.config.clone();
 
-    if hp.config.source_devices.is_empty() {
+    if config.source_devices.is_empty() {
         return Err(StatusCode::BAD_REQUEST);
     }
 
-    let storage = state.app.storage.read().await;
-    let weather = state.weather.read().await;
-
-    // Get sensor readings
     let days = query.days.unwrap_or(30);
     let cutoff_ms = loriot_core::current_timestamp_ms() - (days as u64 * 24 * 60 * 60 * 1000);
 
-    let readings = storage
-        .read_from_disk_filtered(Some(cutoff_ms), None)
-        .unwrap_or_default();
-
-    // Get weather data
-    let weather_records = weather.storage.read_all_from_disk().unwrap_or_default();
-    let weather_data: Vec<_> = weather_records.iter().map(|r| r.weather.clone()).collect();
-
-    // Run analysis
-    let analyzer = HeatPumpAnalyzer::new(hp.config.clone());
-    let report = analyzer.analyze(&readings, &weather_data);
+    // Read history and analyse off the runtime, without holding any lock.
+    let disk = state.app.disk().await;
+    let weather_path = weather_history_path(&state.weather).await;
+    let report = run_blocking(move || {
+        let readings = disk
+            .read_filtered(Some(cutoff_ms), None)
+            .unwrap_or_default();
+        let weather_data = load_daily_weather(&weather_path);
+        HeatPumpAnalyzer::new(config).analyze(&readings, &weather_data)
+    })
+    .await;
 
     Ok(Json(report))
 }

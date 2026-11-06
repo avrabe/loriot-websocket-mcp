@@ -13,6 +13,8 @@ use loriot_core::weather::{
     Coordinates, DailyWeather, WeatherConfig,
 };
 use serde::{Deserialize, Serialize};
+
+use crate::state::run_blocking;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -152,6 +154,20 @@ impl Default for WeatherState {
 
 /// Wrapper for shared weather state
 pub type SharedWeatherState = Arc<RwLock<WeatherState>>;
+
+/// Path of the weather history file, taken out of the lock.
+pub async fn weather_history_path(state: &SharedWeatherState) -> String {
+    state.read().await.storage.storage_path().to_string()
+}
+
+/// Daily weather from the history file at `path`. Blocking file IO.
+pub fn load_daily_weather(path: &str) -> Vec<DailyWeather> {
+    loriot_core::weather::storage::read_records(path)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|r| r.weather)
+        .collect()
+}
 
 /// Query parameters for weather endpoints
 #[derive(Debug, Deserialize)]
@@ -335,10 +351,12 @@ pub async fn get_weather_statistics(
     State(state): State<SharedWeatherState>,
     Query(query): Query<WeatherQuery>,
 ) -> Result<Json<WeatherStatistics>, StatusCode> {
-    let weather = state.read().await;
-
-    // Get all records from disk for full statistics
-    let records = weather.storage.read_all_from_disk().unwrap_or_default();
+    // Get all records from disk for full statistics (off the runtime, no lock held)
+    let path = weather_history_path(&state).await;
+    let records = run_blocking(move || {
+        loriot_core::weather::storage::read_records(&path).unwrap_or_default()
+    })
+    .await;
 
     // Filter by date range if specified
     let filtered: Vec<DailyWeather> = if let (Some(start), Some(end)) =

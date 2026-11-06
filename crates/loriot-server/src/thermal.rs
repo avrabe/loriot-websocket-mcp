@@ -10,7 +10,8 @@ use axum::{
 use loriot_core::thermal::{ThermalAnalysisReport, ThermalAnalyzer};
 use serde::Deserialize;
 
-use crate::weather::SharedWeatherState;
+use crate::state::run_blocking;
+use crate::weather::{load_daily_weather, weather_history_path, SharedWeatherState};
 use crate::AppState;
 
 /// Combined state for thermal analysis endpoints
@@ -29,6 +30,25 @@ pub struct ThermalQuery {
     pub device: Option<String>,
 }
 
+/// Read sensor and weather history and run the thermal analysis, off the
+/// runtime and without holding any lock during file IO.
+async fn thermal_report(
+    state: &ThermalState,
+    cutoff_ms: u64,
+    device: Option<String>,
+) -> ThermalAnalysisReport {
+    let disk = state.app.disk().await;
+    let weather_path = weather_history_path(&state.weather).await;
+    run_blocking(move || {
+        let readings = disk
+            .read_filtered(Some(cutoff_ms), device.as_deref())
+            .unwrap_or_default();
+        let weather_data = load_daily_weather(&weather_path);
+        ThermalAnalyzer::new().analyze(&readings, &weather_data)
+    })
+    .await
+}
+
 /// GET /api/thermal/analyze - Run thermal correlation analysis
 pub async fn analyze_thermal(
     State(state): State<ThermalState>,
@@ -37,22 +57,7 @@ pub async fn analyze_thermal(
     let days = query.days.unwrap_or(30);
     let cutoff_ms = loriot_core::current_timestamp_ms() - (days as u64 * 24 * 60 * 60 * 1000);
 
-    // Get sensor readings
-    let storage = state.app.storage.read().await;
-    let readings = storage
-        .read_from_disk_filtered(Some(cutoff_ms), query.device.as_deref())
-        .unwrap_or_default();
-    drop(storage);
-
-    // Get weather data
-    let weather = state.weather.read().await;
-    let weather_records = weather.storage.read_all_from_disk().unwrap_or_default();
-    let weather_data: Vec<_> = weather_records.iter().map(|r| r.weather.clone()).collect();
-    drop(weather);
-
-    // Run thermal analysis
-    let analyzer = ThermalAnalyzer::new();
-    let report = analyzer.analyze(&readings, &weather_data);
+    let report = thermal_report(&state, cutoff_ms, query.device.clone()).await;
 
     Json(report)
 }
@@ -86,22 +91,7 @@ pub async fn get_thermal_summary(
     let days = query.days.unwrap_or(30);
     let cutoff_ms = loriot_core::current_timestamp_ms() - (days as u64 * 24 * 60 * 60 * 1000);
 
-    // Get sensor readings
-    let storage = state.app.storage.read().await;
-    let readings = storage
-        .read_from_disk_filtered(Some(cutoff_ms), query.device.as_deref())
-        .unwrap_or_default();
-    drop(storage);
-
-    // Get weather data
-    let weather = state.weather.read().await;
-    let weather_records = weather.storage.read_all_from_disk().unwrap_or_default();
-    let weather_data: Vec<_> = weather_records.iter().map(|r| r.weather.clone()).collect();
-    drop(weather);
-
-    // Run thermal analysis
-    let analyzer = ThermalAnalyzer::new();
-    let report = analyzer.analyze(&readings, &weather_data);
+    let report = thermal_report(&state, cutoff_ms, query.device.clone()).await;
 
     Json(ThermalSummary {
         avg_indoor_temp: report.building_metrics.avg_indoor_temp,

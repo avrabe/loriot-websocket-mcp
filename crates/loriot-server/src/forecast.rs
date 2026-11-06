@@ -14,8 +14,28 @@ use loriot_core::weather::forecast::{
 use loriot_core::weather::Coordinates;
 use serde::{Deserialize, Serialize};
 
-use crate::weather::SharedWeatherState;
+use crate::state::run_blocking;
+use crate::weather::{load_daily_weather, weather_history_path, SharedWeatherState};
 use crate::AppState;
+
+/// Read sensor and weather history and run the thermal analysis, off the
+/// runtime and without holding any lock during file IO.
+async fn thermal_report(
+    state: &ForecastState,
+    cutoff_ms: u64,
+    device: Option<String>,
+) -> loriot_core::thermal::ThermalAnalysisReport {
+    let disk = state.app.disk().await;
+    let weather_path = weather_history_path(&state.weather).await;
+    run_blocking(move || {
+        let readings = disk
+            .read_filtered(Some(cutoff_ms), device.as_deref())
+            .unwrap_or_default();
+        let weather_data = load_daily_weather(&weather_path);
+        ThermalAnalyzer::new().analyze(&readings, &weather_data)
+    })
+    .await
+}
 
 /// Combined state for forecast endpoints
 #[derive(Clone)]
@@ -133,27 +153,15 @@ pub async fn get_room_predictions(
         loriot_core::current_timestamp_ms() - (history_days as u64 * 24 * 60 * 60 * 1000);
 
     // Get coordinates from weather state
-    let weather_lock = state.weather.read().await;
-    let coords = weather_lock
+    let coords = state
+        .weather
+        .read()
+        .await
         .location
         .unwrap_or_else(|| Coordinates::new(51.4818, 7.2162));
-    let weather_records = weather_lock
-        .storage
-        .read_all_from_disk()
-        .unwrap_or_default();
-    let weather_data: Vec<_> = weather_records.iter().map(|r| r.weather.clone()).collect();
-    drop(weather_lock);
-
-    // Get sensor readings for thermal analysis
-    let storage = state.app.storage.read().await;
-    let readings = storage
-        .read_from_disk_filtered(Some(cutoff_ms), query.device.as_deref())
-        .unwrap_or_default();
-    drop(storage);
 
     // Run thermal analysis to get device characteristics
-    let analyzer = ThermalAnalyzer::new();
-    let thermal_report = analyzer.analyze(&readings, &weather_data);
+    let thermal_report = thermal_report(&state, cutoff_ms, query.device.clone()).await;
 
     // Fetch weather forecast
     let fetcher = ForecastFetcher::new(days);
@@ -219,25 +227,8 @@ pub async fn get_thermal_models(
     let cutoff_ms =
         loriot_core::current_timestamp_ms() - (history_days as u64 * 24 * 60 * 60 * 1000);
 
-    // Get weather data
-    let weather_lock = state.weather.read().await;
-    let weather_records = weather_lock
-        .storage
-        .read_all_from_disk()
-        .unwrap_or_default();
-    let weather_data: Vec<_> = weather_records.iter().map(|r| r.weather.clone()).collect();
-    drop(weather_lock);
-
-    // Get sensor readings
-    let storage = state.app.storage.read().await;
-    let readings = storage
-        .read_from_disk_filtered(Some(cutoff_ms), query.device.as_deref())
-        .unwrap_or_default();
-    drop(storage);
-
     // Run thermal analysis
-    let analyzer = ThermalAnalyzer::new();
-    let thermal_report = analyzer.analyze(&readings, &weather_data);
+    let thermal_report = thermal_report(&state, cutoff_ms, query.device.clone()).await;
 
     // Return models for each device
     thermal_report

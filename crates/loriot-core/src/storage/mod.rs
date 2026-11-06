@@ -36,6 +36,102 @@ impl Default for StorageConfig {
     }
 }
 
+/// Read/append access to the JSONL history file, independent of the
+/// in-memory cache. Cheap to clone. All methods do blocking file IO.
+#[derive(Clone, Debug)]
+pub struct DiskReader {
+    path: String,
+}
+
+impl DiskReader {
+    pub fn new(path: impl Into<String>) -> Self {
+        Self { path: path.into() }
+    }
+
+    pub fn path(&self) -> &str {
+        &self.path
+    }
+
+    /// Parse every readable line, calling `f` for each reading.
+    fn for_each_reading(&self, mut f: impl FnMut(SensorReading)) -> Result<()> {
+        if !Path::new(&self.path).exists() {
+            return Ok(());
+        }
+        let reader = std::io::BufReader::new(std::fs::File::open(&self.path)?);
+        for line in reader.lines() {
+            let line = line?;
+            if line.trim().is_empty() {
+                continue;
+            }
+            if let Ok(reading) = serde_json::from_str::<SensorReading>(&line) {
+                f(reading);
+            }
+        }
+        Ok(())
+    }
+
+    /// Readings matching `keep`, de-duplicated by (EUI, ts), sorted by ts.
+    fn collect(&self, keep: impl Fn(&SensorReading) -> bool) -> Result<Vec<SensorReading>> {
+        let mut readings = Vec::new();
+        let mut seen = FxHashSet::default();
+        self.for_each_reading(|reading| {
+            if keep(&reading) && seen.insert(format!("{}:{}", reading.eui, reading.ts)) {
+                readings.push(reading);
+            }
+        })?;
+        readings.sort_by_key(|r| r.ts);
+        Ok(readings)
+    }
+
+    /// All readings on disk.
+    pub fn read_all(&self) -> Result<Vec<SensorReading>> {
+        self.read_filtered(None, None)
+    }
+
+    /// Readings at or after `cutoff_timestamp`, optionally for one device.
+    pub fn read_filtered(
+        &self,
+        cutoff_timestamp: Option<u64>,
+        device_eui: Option<&str>,
+    ) -> Result<Vec<SensorReading>> {
+        self.collect(|r| {
+            cutoff_timestamp.is_none_or(|c| r.ts >= c) && device_eui.is_none_or(|e| r.eui == e)
+        })
+    }
+
+    /// Readings with `start_ts <= ts <= end_ts`, optionally for one device.
+    pub fn read_in_range(
+        &self,
+        start_ts: u64,
+        end_ts: u64,
+        device_eui: Option<&str>,
+    ) -> Result<Vec<SensorReading>> {
+        self.collect(|r| {
+            r.ts >= start_ts && r.ts <= end_ts && device_eui.is_none_or(|e| r.eui == e)
+        })
+    }
+
+    /// Earliest and latest timestamp on disk, without keeping the readings.
+    pub fn data_range(&self) -> Result<(Option<u64>, Option<u64>)> {
+        let (mut min, mut max): (Option<u64>, Option<u64>) = (None, None);
+        self.for_each_reading(|r| {
+            min = Some(min.map_or(r.ts, |m| m.min(r.ts)));
+            max = Some(max.map_or(r.ts, |m| m.max(r.ts)));
+        })?;
+        Ok((min, max))
+    }
+
+    /// Append one JSONL line (without the trailing newline).
+    pub fn append_line(&self, line: &str) -> Result<()> {
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.path)?;
+        writeln!(file, "{}", line)?;
+        Ok(())
+    }
+}
+
 /// Manages sensor reading storage with memory caching and JSONL persistence
 pub struct StorageManager {
     config: StorageConfig,
@@ -106,107 +202,35 @@ impl StorageManager {
         Ok(())
     }
 
+    /// Read-only handle to the JSONL history file. Clone it out of any lock
+    /// and use it from a blocking thread.
+    pub fn disk(&self) -> DiskReader {
+        DiskReader::new(self.config.file_path.clone())
+    }
+
     /// Read ALL readings from the storage file (for analytics/export)
     /// This is slower than get_readings() but provides complete historical data.
     pub fn read_all_from_disk(&self) -> Result<Vec<SensorReading>> {
-        self.read_from_disk_filtered(None, None)
+        self.disk().read_all()
     }
 
     /// Read readings from disk with optional time and device filters
-    /// This is the primary method for getting complete historical data for analytics.
     pub fn read_from_disk_filtered(
         &self,
         cutoff_timestamp: Option<u64>,
         device_eui: Option<&str>,
     ) -> Result<Vec<SensorReading>> {
-        if !Path::new(&self.config.file_path).exists() {
-            return Ok(Vec::new());
-        }
-
-        let file = std::fs::File::open(&self.config.file_path)?;
-        let reader = std::io::BufReader::new(file);
-        let mut readings = Vec::new();
-        let mut seen = FxHashSet::default();
-
-        for line in reader.lines() {
-            let line = line?;
-            if line.trim().is_empty() {
-                continue;
-            }
-
-            if let Ok(reading) = serde_json::from_str::<SensorReading>(&line) {
-                // Apply time filter
-                if let Some(cutoff) = cutoff_timestamp {
-                    if reading.ts < cutoff {
-                        continue;
-                    }
-                }
-
-                // Apply device filter
-                if let Some(eui) = device_eui {
-                    if reading.eui != eui {
-                        continue;
-                    }
-                }
-
-                let key = format!("{}:{}", reading.eui, reading.ts);
-                if !seen.contains(&key) {
-                    seen.insert(key);
-                    readings.push(reading);
-                }
-            }
-        }
-
-        readings.sort_by_key(|r| r.ts);
-        Ok(readings)
+        self.disk().read_filtered(cutoff_timestamp, device_eui)
     }
 
     /// Read readings from disk within a specific time range
-    /// Used for analytics when navigating to historical periods
     pub fn read_from_disk_in_range(
         &self,
         start_ts: u64,
         end_ts: u64,
         device_eui: Option<&str>,
     ) -> Result<Vec<SensorReading>> {
-        if !Path::new(&self.config.file_path).exists() {
-            return Ok(Vec::new());
-        }
-
-        let file = std::fs::File::open(&self.config.file_path)?;
-        let reader = std::io::BufReader::new(file);
-        let mut readings = Vec::new();
-        let mut seen = FxHashSet::default();
-
-        for line in reader.lines() {
-            let line = line?;
-            if line.trim().is_empty() {
-                continue;
-            }
-
-            if let Ok(reading) = serde_json::from_str::<SensorReading>(&line) {
-                // Apply time range filter
-                if reading.ts < start_ts || reading.ts > end_ts {
-                    continue;
-                }
-
-                // Apply device filter
-                if let Some(eui) = device_eui {
-                    if reading.eui != eui {
-                        continue;
-                    }
-                }
-
-                let key = format!("{}:{}", reading.eui, reading.ts);
-                if !seen.contains(&key) {
-                    seen.insert(key);
-                    readings.push(reading);
-                }
-            }
-        }
-
-        readings.sort_by_key(|r| r.ts);
-        Ok(readings)
+        self.disk().read_in_range(start_ts, end_ts, device_eui)
     }
 
     /// Get total count of all readings (memory + disk)
@@ -217,46 +241,47 @@ impl StorageManager {
     /// Get the overall data range (earliest and latest timestamps)
     /// Reads from disk for accurate range if memory cache is limited
     pub fn get_data_range(&self) -> (Option<u64>, Option<u64>) {
-        // Try to get from disk for accurate range
-        if let Ok(readings) = self.read_from_disk_filtered(None, None) {
-            if readings.is_empty() {
-                return (None, None);
-            }
-            let earliest = readings.iter().map(|r| r.ts).min();
-            let latest = readings.iter().map(|r| r.ts).max();
-            return (earliest, latest);
-        }
+        self.disk()
+            .data_range()
+            .unwrap_or_else(|_| self.memory_data_range())
+    }
 
-        // Fallback to memory cache
-        if self.memory_cache.is_empty() {
-            return (None, None);
-        }
+    /// Earliest and latest timestamp in the in-memory cache only.
+    pub fn memory_data_range(&self) -> (Option<u64>, Option<u64>) {
         let earliest = self.memory_cache.iter().map(|r| r.ts).min();
         let latest = self.memory_cache.iter().map(|r| r.ts).max();
         (earliest, latest)
     }
 
-    /// Store a new reading, returning true if it was new (not a duplicate)
+    /// Store a new reading, returning true if it was new (not a duplicate).
+    /// Does file IO; async callers should use [`Self::insert_reading`] under
+    /// their lock and append the returned line with [`DiskReader::append_line`]
+    /// outside it.
     pub fn store_reading(&mut self, reading: SensorReading) -> Result<bool> {
+        match self.insert_reading(reading)? {
+            Some(line) => {
+                self.disk().append_line(&line)?;
+                Ok(true)
+            }
+            None => Ok(false),
+        }
+    }
+
+    /// Add a reading to the in-memory state without touching the disk.
+    /// Returns the JSONL line to persist if the reading is new, `None` for a
+    /// duplicate.
+    pub fn insert_reading(&mut self, reading: SensorReading) -> Result<Option<String>> {
         let key = format!("{}:{}", reading.eui, reading.ts);
 
         if self.seen_keys.contains(&key) {
-            return Ok(false);
+            return Ok(None);
         }
-
-        self.seen_keys.insert(key);
-
-        let mut file = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&self.config.file_path)?;
 
         let line = serde_json::to_string(&reading).map_err(|e| {
             AppError::Storage(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
         })?;
-        writeln!(file, "{}", line)?;
 
-        // Update total count
+        self.seen_keys.insert(key);
         self.total_readings_count += 1;
 
         let insert_pos = self
@@ -269,7 +294,7 @@ impl StorageManager {
             self.memory_cache.remove(0);
         }
 
-        Ok(true)
+        Ok(Some(line))
     }
 
     /// Get all readings in memory

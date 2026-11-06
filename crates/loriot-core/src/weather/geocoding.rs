@@ -4,6 +4,7 @@
 //! Rate limited to 1 request per second as per OSM usage policy
 
 use super::Coordinates;
+#[cfg(any(feature = "async", feature = "blocking"))]
 use crate::{AppError, Result};
 use serde::{Deserialize, Serialize};
 
@@ -37,6 +38,7 @@ pub struct AddressComponents {
 }
 
 /// Nominatim API response structure
+#[cfg(any(feature = "async", feature = "blocking"))]
 #[derive(Debug, Deserialize)]
 struct NominatimResponse {
     lat: String,
@@ -47,6 +49,7 @@ struct NominatimResponse {
     importance: Option<f64>,
 }
 
+#[cfg(any(feature = "async", feature = "blocking"))]
 #[derive(Debug, Deserialize)]
 struct NominatimAddress {
     house_number: Option<String>,
@@ -67,6 +70,7 @@ pub struct GeocodingService {
     /// Base URL for Nominatim API
     base_url: String,
     /// User agent for API requests (required by Nominatim)
+    #[cfg_attr(not(any(feature = "async", feature = "blocking")), allow(dead_code))]
     user_agent: String,
 }
 
@@ -206,6 +210,7 @@ impl GeocodingService {
         Ok(Self::parse_response(response))
     }
 
+    #[cfg(any(feature = "async", feature = "blocking"))]
     fn parse_response(response: NominatimResponse) -> Option<GeocodingResult> {
         let latitude: f64 = response.lat.parse().ok()?;
         let longitude: f64 = response.lon.parse().ok()?;

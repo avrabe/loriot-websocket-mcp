@@ -29,8 +29,9 @@ use tokio::sync::RwLock;
 use tower_http::{
     cors::{Any, CorsLayer},
     services::ServeDir,
-    trace::TraceLayer,
+    trace::{DefaultMakeSpan, DefaultOnRequest, DefaultOnResponse, TraceLayer},
 };
+use tracing::Level;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 pub use state::AppState;
@@ -44,7 +45,7 @@ Environment:
   LORIOT_WS_TOKEN  LORIOT application token (required to run)
   BIND             listen address (falls back to HOST, default 0.0.0.0)
   PORT             listen port (default 3000)
-  RUST_LOG         log filter (default loriot_server=debug,tower_http=debug)";
+  RUST_LOG         log filter (default loriot_server=debug,tower_http=info)";
 
 /// What the command line asks for.
 #[derive(Debug, PartialEq)]
@@ -78,6 +79,28 @@ fn bind_host(bind: Option<String>, host: Option<String>) -> String {
         .map(|h| h.trim().to_string())
         .filter(|h| !h.is_empty())
         .unwrap_or_else(|| "0.0.0.0".to_string())
+}
+
+/// Default log filter when RUST_LOG is unset.
+const DEFAULT_LOG_FILTER: &str = "loriot_server=debug,tower_http=info";
+
+/// Add request logging and CORS. Every request to `app` gets one INFO line
+/// when its response is sent (request start is DEBUG). `health` is merged in
+/// *after* the trace layer, so watchdog probes are never logged.
+fn with_http_layers(app: Router, health: Router) -> Router {
+    app.layer(
+        TraceLayer::new_for_http()
+            .make_span_with(DefaultMakeSpan::new().level(Level::INFO))
+            .on_request(DefaultOnRequest::new().level(Level::DEBUG))
+            .on_response(DefaultOnResponse::new().level(Level::INFO)),
+    )
+    .merge(health)
+    .layer(
+        CorsLayer::new()
+            .allow_origin(Any)
+            .allow_methods(Any)
+            .allow_headers(Any),
+    )
 }
 
 /// GET /health - liveness of the process and runtime. Always 200 while the
@@ -126,7 +149,7 @@ async fn run() -> anyhow::Result<()> {
         .with(tracing_subscriber::fmt::layer())
         .with(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "loriot_server=debug,tower_http=debug".into()),
+                .unwrap_or_else(|_| DEFAULT_LOG_FILTER.into()),
         )
         .init();
 
@@ -152,8 +175,12 @@ async fn run() -> anyhow::Result<()> {
         ..Default::default()
     };
 
-    let mut storage = StorageManager::new(storage_config);
-    storage.load_existing_data()?;
+    // The history file can be large: parse it on a blocking thread.
+    let storage = state::run_blocking(move || {
+        let mut storage = StorageManager::new(storage_config);
+        storage.load_existing_data().map(|()| storage)
+    })
+    .await?;
 
     tracing::info!("Loaded {} readings from storage", storage.reading_count());
 
@@ -247,8 +274,6 @@ async fn run() -> anyhow::Result<()> {
         // SSE routes
         .route("/sse/readings", get(sse::readings_stream))
         .route("/sse/status", get(sse::status_stream))
-        // Health check (liveness; see `health`)
-        .route("/health", get(health))
         .with_state(state.clone())
         // Nest weather routes
         .nest("/api/weather", weather_router)
@@ -264,22 +289,19 @@ async fn run() -> anyhow::Result<()> {
         .fallback_service(
             ServeDir::new("assets")
                 .append_index_html_on_directories(true)
-                .not_found_service(tower::service_fn(|_| async {
+                .fallback(tower::service_fn(|_| async {
                     // Serve index.html for SPA routes
                     match tokio::fs::read_to_string("assets/index.html").await {
                         Ok(html) => Ok((StatusCode::OK, Html(html)).into_response()),
                         Err(_) => Ok((StatusCode::NOT_FOUND, "Not found").into_response()),
                     }
                 })),
-        )
-        // Add middleware
-        .layer(TraceLayer::new_for_http())
-        .layer(
-            CorsLayer::new()
-                .allow_origin(Any)
-                .allow_methods(Any)
-                .allow_headers(Any),
         );
+    // Health check (liveness; see `health`), outside the request log.
+    let health_router = Router::new()
+        .route("/health", get(health))
+        .with_state(state.clone());
+    let app = with_http_layers(app, health_router);
 
     // Spawn the Loriot WebSocket handler
     let ws_state = state.clone();
@@ -343,6 +365,62 @@ mod tests {
         assert_eq!(bind_host(s("127.0.0.1"), s("10.0.0.1")), "127.0.0.1");
         assert_eq!(bind_host(None, s("::1")), "::1");
         assert_eq!(bind_host(s("  "), None), "0.0.0.0");
+    }
+
+    /// Collects formatted log output.
+    #[derive(Clone, Default)]
+    struct LogBuf(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+    impl std::io::Write for LogBuf {
+        fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(b);
+            Ok(b.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for LogBuf {
+        type Writer = LogBuf;
+        fn make_writer(&'a self) -> Self::Writer {
+            self.clone()
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn requests_logged_at_info_except_health() {
+        use axum::{body::Body, http::Request};
+        use tower::ServiceExt;
+
+        let buf = LogBuf::default();
+        let subscriber = tracing_subscriber::fmt()
+            .with_writer(buf.clone())
+            .with_ansi(false)
+            .with_env_filter(tracing_subscriber::EnvFilter::new(DEFAULT_LOG_FILTER))
+            .finish();
+        let _guard = tracing::subscriber::set_default(subscriber);
+
+        let app = with_http_layers(
+            Router::new().route("/api/ping", get(|| async { "pong" })),
+            Router::new().route("/health", get(|| async { "ok" })),
+        );
+        for uri in ["/health", "/api/ping"] {
+            let resp = app
+                .clone()
+                .oneshot(Request::get(uri).body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(resp.status(), StatusCode::OK, "{uri}");
+        }
+
+        let log = String::from_utf8(buf.0.lock().unwrap().clone()).unwrap();
+        assert!(
+            log.contains("uri=/api/ping"),
+            "API request not logged:\n{log}"
+        );
+        assert!(log.contains("finished processing request"), "{log}");
+        assert!(!log.contains("/health"), "/health was logged:\n{log}");
     }
 
     #[tokio::test]
