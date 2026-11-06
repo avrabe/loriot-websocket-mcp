@@ -228,3 +228,159 @@ async fn create_reading(
         parsed,
     ))
 }
+
+#[cfg(test)]
+mod tests {
+    //! Regression tests for the 2026-10 hang: the client must notice a dead or
+    //! silent upstream within a bounded time, reconnect, and never starve the
+    //! runtime. All tests use a local plain-`ws://` server and a dummy token.
+    use super::*;
+    use loriot_core::{AppConfig, StorageConfig, StorageManager};
+    use std::collections::HashMap;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+    use std::time::Instant;
+    use tokio::net::TcpListener;
+    use tokio_tungstenite::accept_async;
+
+    const DUMMY_TOKEN: &str = "dummy-test-token";
+
+    fn test_state(name: &str) -> AppState {
+        let path = std::env::temp_dir().join(format!(
+            "loriot-test-{}-{}.jsonl",
+            name,
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+        let storage = StorageManager::new(StorageConfig {
+            file_path: path.to_string_lossy().into_owned(),
+            ..Default::default()
+        });
+        AppState::new(
+            storage,
+            HashMap::new(),
+            AppConfig {
+                loriot_token: DUMMY_TOKEN.to_string(),
+                device_names_file: None,
+                ..Default::default()
+            },
+        )
+    }
+
+    #[derive(Clone, Copy)]
+    enum Upstream {
+        /// Complete the handshake, send one message, then never poll the
+        /// socket again: no data, no pong, no close. The kernel still ACKs, so
+        /// the client's writes succeed (a half-open / wedged peer).
+        GoSilent,
+        /// Send one message, then reset the TCP connection without a close frame.
+        DropTcp,
+        /// Accept TCP but never answer the websocket handshake.
+        NoHandshake,
+    }
+
+    /// Start a local upstream; returns its URL and a counter of TCP accepts.
+    async fn spawn_upstream(kind: Upstream) -> (String, Arc<AtomicUsize>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let accepts = Arc::new(AtomicUsize::new(0));
+        let counter = accepts.clone();
+        tokio::spawn(async move {
+            let mut held = Vec::new();
+            loop {
+                let Ok((tcp, _)) = listener.accept().await else {
+                    continue;
+                };
+                counter.fetch_add(1, Ordering::SeqCst);
+                if let Upstream::NoHandshake = kind {
+                    held.push(tokio::spawn(async move {
+                        let _tcp = tcp;
+                        std::future::pending::<()>().await;
+                    }));
+                    continue;
+                }
+                let Ok(mut ws) = accept_async(tcp).await else {
+                    continue;
+                };
+                let _ = ws
+                    .send(Message::Text(r#"{"cmd":"noop"}"#.into()))
+                    .await;
+                match kind {
+                    Upstream::GoSilent => held.push(tokio::spawn(async move {
+                        let _ws = ws;
+                        std::future::pending::<()>().await;
+                    })),
+                    Upstream::DropTcp => {
+                        let tcp = ws.into_inner();
+                        let _ = tcp.set_linger(Some(Duration::ZERO));
+                        drop(tcp);
+                    }
+                    Upstream::NoHandshake => unreachable!(),
+                }
+            }
+        });
+        (format!("ws://{addr}/app"), accepts)
+    }
+
+    /// Run the client against `kind` and wait until it connects a second time.
+    /// Also runs a 10 ms ticker on the same (single-threaded) runtime so a
+    /// client that busy-loops or blocks would show up as missing ticks.
+    async fn assert_reconnects(kind: Upstream, cfg: LoriotClientConfig, within: Duration) {
+        let (url, accepts) = spawn_upstream(kind).await;
+        let cfg = LoriotClientConfig { url, ..cfg };
+
+        let ticks = Arc::new(AtomicUsize::new(0));
+        let t = ticks.clone();
+        let ticker = tokio::spawn(async move {
+            let mut iv = interval(Duration::from_millis(10));
+            loop {
+                iv.tick().await;
+                t.fetch_add(1, Ordering::SeqCst);
+            }
+        });
+
+        let client = tokio::spawn(run_loriot_connection_with(test_state("reconnect"), cfg));
+        let start = Instant::now();
+        while accepts.load(Ordering::SeqCst) < 2 && start.elapsed() < within {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        let elapsed = start.elapsed();
+        client.abort();
+        ticker.abort();
+
+        let n = accepts.load(Ordering::SeqCst);
+        assert!(
+            n >= 2,
+            "client did not reconnect within {within:?} (accepts = {n}); a dead upstream is never detected"
+        );
+        // The runtime must stay responsive: expect at least a quarter of the
+        // ideal 10 ms ticks while we waited.
+        let expected = (elapsed.as_millis() / 10 / 4) as usize;
+        let got = ticks.load(Ordering::SeqCst);
+        assert!(got >= expected, "runtime starved: {got} ticks, expected >= {expected}");
+    }
+
+    fn fast() -> LoriotClientConfig {
+        LoriotClientConfig {
+            ping_interval: Duration::from_millis(100),
+            pong_timeout: Duration::from_millis(300),
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn reconnects_when_upstream_goes_silent() {
+        assert_reconnects(Upstream::GoSilent, fast(), Duration::from_secs(5)).await;
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn reconnects_when_upstream_drops_tcp() {
+        assert_reconnects(Upstream::DropTcp, fast(), Duration::from_secs(6)).await;
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn reconnects_when_handshake_never_completes() {
+        // Uses the production connect timeout on purpose.
+        assert_reconnects(Upstream::NoHandshake, fast(), Duration::from_secs(20)).await;
+    }
+}
