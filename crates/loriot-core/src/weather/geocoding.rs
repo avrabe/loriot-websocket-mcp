@@ -70,10 +70,7 @@ pub struct GeocodingService {
     /// Base URL for Nominatim API
     base_url: String,
     /// User agent for API requests (required by Nominatim)
-    #[cfg_attr(
-        not(any(feature = "async", feature = "blocking")),
-        allow(dead_code)
-    )]
+    #[cfg_attr(not(any(feature = "async", feature = "blocking")), allow(dead_code))]
     user_agent: String,
 }
 
