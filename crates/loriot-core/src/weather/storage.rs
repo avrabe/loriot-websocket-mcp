@@ -186,29 +186,40 @@ impl WeatherStorage {
 
     /// Read all records from disk (for analytics that need full history)
     pub fn read_all_from_disk(&self) -> Result<Vec<WeatherRecord>> {
-        let path = Path::new(&self.config.storage_path);
-        if !path.exists() {
-            return Ok(Vec::new());
-        }
-
-        let file = std::fs::File::open(path)?;
-        let reader = std::io::BufReader::new(file);
-        let mut records = Vec::new();
-
-        for line in reader.lines() {
-            let line = line?;
-            if line.trim().is_empty() {
-                continue;
-            }
-
-            if let Ok(record) = serde_json::from_str::<WeatherRecord>(&line) {
-                records.push(record);
-            }
-        }
-
-        records.sort_by(|a, b| b.weather.date.cmp(&a.weather.date));
-        Ok(records)
+        read_records(&self.config.storage_path)
     }
+
+    /// Path of the JSONL file, for [`read_records`] outside any lock.
+    pub fn storage_path(&self) -> &str {
+        &self.config.storage_path
+    }
+}
+
+/// Read all weather records from the JSONL file at `path`, newest date first.
+/// Blocking file IO.
+pub fn read_records(path: &str) -> Result<Vec<WeatherRecord>> {
+    let path = Path::new(path);
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+
+    let file = std::fs::File::open(path)?;
+    let reader = std::io::BufReader::new(file);
+    let mut records = Vec::new();
+
+    for line in reader.lines() {
+        let line = line?;
+        if line.trim().is_empty() {
+            continue;
+        }
+
+        if let Ok(record) = serde_json::from_str::<WeatherRecord>(&line) {
+            records.push(record);
+        }
+    }
+
+    records.sort_by(|a, b| b.weather.date.cmp(&a.weather.date));
+    Ok(records)
 }
 
 /// Summary of outdoor weather conditions for comparison with indoor sensors

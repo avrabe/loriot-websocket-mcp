@@ -152,8 +152,12 @@ async fn run() -> anyhow::Result<()> {
         ..Default::default()
     };
 
-    let mut storage = StorageManager::new(storage_config);
-    storage.load_existing_data()?;
+    // The history file can be large: parse it on a blocking thread.
+    let storage = state::run_blocking(move || {
+        let mut storage = StorageManager::new(storage_config);
+        storage.load_existing_data().map(|()| storage)
+    })
+    .await?;
 
     tracing::info!("Loaded {} readings from storage", storage.reading_count());
 

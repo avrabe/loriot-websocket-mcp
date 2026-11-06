@@ -36,7 +36,7 @@ pub use analytics::{
     format_duration, format_timestamp, AnalyticsEngine, AnalyticsReport, DataGap, DataGapSeverity,
 };
 pub use sensors::{decode_lht65s_pir, SensorReading};
-pub use storage::{DeviceStats, StorageConfig, StorageManager};
+pub use storage::{DeviceStats, DiskReader, StorageConfig, StorageManager};
 
 /// Common error types for the application
 #[derive(Debug, thiserror::Error)]

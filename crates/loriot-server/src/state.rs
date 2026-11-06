@@ -1,10 +1,23 @@
 //! Shared application state
 
-use loriot_core::{AppConfig, ConnectionStatus, SensorReading, StorageManager};
+use loriot_core::{AppConfig, ConnectionStatus, DiskReader, SensorReading, StorageManager};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::Arc;
 use tokio::sync::{broadcast, RwLock};
+
+/// Run blocking work (file IO, heavy analysis) off the async runtime.
+/// A panic in `f` is propagated to the caller.
+pub async fn run_blocking<T, F>(f: F) -> T
+where
+    F: FnOnce() -> T + Send + 'static,
+    T: Send + 'static,
+{
+    match tokio::task::spawn_blocking(f).await {
+        Ok(v) => v,
+        Err(e) => std::panic::resume_unwind(e.into_panic()),
+    }
+}
 
 /// Lock-free view of the upstream (Loriot) connection, read by `/health`.
 /// Atomics only, so the health check can never wait on a contended lock.
@@ -82,17 +95,65 @@ impl AppState {
         let _ = self.status_tx.send(status);
     }
 
-    /// Add a new reading and broadcast to subscribers
+    /// Add a new reading and broadcast to subscribers. The in-memory update
+    /// happens under the storage lock; the file append runs afterwards on a
+    /// blocking thread, with the lock released.
     pub async fn add_reading(&self, reading: SensorReading) -> loriot_core::Result<bool> {
-        let is_new = self.storage.write().await.store_reading(reading.clone())?;
-        if is_new {
-            let _ = self.reading_tx.send(reading);
-        }
-        Ok(is_new)
+        let (line, disk) = {
+            let mut storage = self.storage.write().await;
+            (storage.insert_reading(reading.clone())?, storage.disk())
+        };
+        let Some(line) = line else {
+            return Ok(false);
+        };
+        run_blocking(move || disk.append_line(&line)).await?;
+        let _ = self.reading_tx.send(reading);
+        Ok(true)
+    }
+
+    /// Handle to the history file, cloned out of the storage lock.
+    pub async fn disk(&self) -> DiskReader {
+        self.storage.read().await.disk()
     }
 
     /// Get device name from EUI
     pub async fn get_device_name(&self, eui: &str) -> Option<String> {
         self.device_names.read().await.get(eui).cloned()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use loriot_core::StorageConfig;
+
+    fn reading(ts: u64) -> SensorReading {
+        serde_json::from_str(&format!(
+            r#"{{"cmd":"rx","eui":"E1","data":"00","ts":{ts},"name":null}}"#
+        ))
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn add_reading_persists_once_and_dedupes() {
+        let path = std::env::temp_dir().join(format!("loriot-state-{}.jsonl", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let storage = StorageManager::new(StorageConfig {
+            file_path: path.to_string_lossy().into_owned(),
+            ..Default::default()
+        });
+        let state = AppState::new(storage, HashMap::new(), AppConfig::default());
+        let mut rx = state.reading_tx.subscribe();
+
+        assert!(state.add_reading(reading(1)).await.unwrap());
+        assert!(!state.add_reading(reading(1)).await.unwrap());
+        assert!(state.add_reading(reading(2)).await.unwrap());
+
+        let lines = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(lines.lines().count(), 2);
+        assert_eq!(state.storage.read().await.reading_count(), 2);
+        assert_eq!(rx.recv().await.unwrap().ts, 1);
+        assert_eq!(rx.recv().await.unwrap().ts, 2);
+        let _ = std::fs::remove_file(&path);
     }
 }

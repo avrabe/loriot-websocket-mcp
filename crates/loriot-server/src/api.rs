@@ -5,9 +5,10 @@ use axum::{
     http::StatusCode,
     Json,
 };
-use loriot_core::{AnalyticsEngine, DeviceStats, SensorReading, TimeWindow};
+use loriot_core::{AnalyticsEngine, DeviceStats, DiskReader, SensorReading, TimeWindow};
 use serde::{Deserialize, Serialize};
 
+use crate::state::run_blocking;
 use crate::AppState;
 
 #[derive(Debug, Deserialize)]
@@ -75,15 +76,25 @@ pub async fn get_system_info(State(state): State<AppState>) -> Json<SystemInfo> 
 
 /// GET /api/data-range - Get the overall data range (earliest and latest timestamps)
 pub async fn get_data_range(State(state): State<AppState>) -> Json<DataRange> {
-    let storage = state.storage.read().await;
+    let (disk, total_readings, memory_range) = {
+        let storage = state.storage.read().await;
+        (
+            storage.disk(),
+            storage.total_count(),
+            storage.memory_data_range(),
+        )
+    };
 
-    // Get data range from storage
-    let (earliest, latest) = storage.get_data_range();
+    // Full scan of the history file, off the runtime and outside the lock;
+    // fall back to the in-memory range if the file cannot be read.
+    let (earliest, latest) = run_blocking(move || disk.data_range())
+        .await
+        .unwrap_or(memory_range);
 
     Json(DataRange {
         earliest_ts: earliest,
         latest_ts: latest,
-        total_readings: storage.total_count(),
+        total_readings,
     })
 }
 
@@ -206,23 +217,26 @@ pub async fn get_analytics(
     State(state): State<AppState>,
     Query(query): Query<ReadingsQuery>,
 ) -> Json<loriot_core::AnalyticsReport> {
-    let storage = state.storage.read().await;
+    let disk = state.disk().await;
+    Json(run_blocking(move || analytics_from_disk(&disk, &query, None)).await)
+}
 
+/// Read the requested slice of history and analyse it. Blocking.
+fn analytics_from_disk(
+    disk: &DiskReader,
+    query: &ReadingsQuery,
+    eui: Option<&str>,
+) -> loriot_core::AnalyticsReport {
     // Use explicit time range if provided, otherwise use time_window
     let readings = if let (Some(start), Some(end)) = (query.start_ts, query.end_ts) {
-        storage
-            .read_from_disk_in_range(start, end, None)
-            .unwrap_or_default()
+        disk.read_in_range(start, end, eui).unwrap_or_default()
     } else {
         let time_window = parse_time_window(query.time_window.as_deref());
         let cutoff = time_window.get_cutoff_timestamp();
-        storage
-            .read_from_disk_filtered(cutoff, None)
-            .unwrap_or_default()
+        disk.read_filtered(cutoff, eui).unwrap_or_default()
     };
 
-    let report = AnalyticsEngine::analyze_readings(&readings.iter().collect::<Vec<_>>(), None);
-    Json(report)
+    AnalyticsEngine::analyze_readings(&readings.iter().collect::<Vec<_>>(), eui)
 }
 
 /// GET /api/analytics/:eui - Get analytics for a specific device
@@ -232,24 +246,8 @@ pub async fn get_device_analytics(
     Path(eui): Path<String>,
     Query(query): Query<ReadingsQuery>,
 ) -> Json<loriot_core::AnalyticsReport> {
-    let storage = state.storage.read().await;
-
-    // Use explicit time range if provided, otherwise use time_window
-    let readings = if let (Some(start), Some(end)) = (query.start_ts, query.end_ts) {
-        storage
-            .read_from_disk_in_range(start, end, Some(&eui))
-            .unwrap_or_default()
-    } else {
-        let time_window = parse_time_window(query.time_window.as_deref());
-        let cutoff = time_window.get_cutoff_timestamp();
-        storage
-            .read_from_disk_filtered(cutoff, Some(&eui))
-            .unwrap_or_default()
-    };
-
-    let report =
-        AnalyticsEngine::analyze_readings(&readings.iter().collect::<Vec<_>>(), Some(&eui));
-    Json(report)
+    let disk = state.disk().await;
+    Json(run_blocking(move || analytics_from_disk(&disk, &query, Some(&eui))).await)
 }
 
 #[cfg(test)]
@@ -266,11 +264,8 @@ mod tests {
 
     /// AppState over a JSONL file with `lines` readings.
     fn state_with_history(name: &str, lines: usize) -> AppState {
-        let path = std::env::temp_dir().join(format!(
-            "loriot-api-{}-{}.jsonl",
-            name,
-            std::process::id()
-        ));
+        let path =
+            std::env::temp_dir().join(format!("loriot-api-{}-{}.jsonl", name, std::process::id()));
         let mut f = std::io::BufWriter::new(std::fs::File::create(&path).unwrap());
         for i in 0..lines {
             writeln!(
@@ -332,7 +327,10 @@ mod tests {
         assert_eq!(range.earliest_ts, Some(1_700_000_000_000));
         assert_eq!(range.latest_ts, Some(1_700_000_000_000 + 299_999 * 1000));
         // Only meaningful if the read itself takes a while.
-        assert!(took > Duration::from_millis(200), "history too small: {took:?}");
+        assert!(
+            took > Duration::from_millis(200),
+            "history too small: {took:?}"
+        );
         assert!(
             gap < Duration::from_millis(100),
             "runtime blocked for {gap:?} while get_data_range read {took:?} of history"
@@ -350,6 +348,9 @@ mod tests {
             end_ts: None,
         };
         let (_, gap) = max_tick_gap(get_analytics(State(state), Query(query))).await;
-        assert!(gap < Duration::from_millis(100), "runtime blocked for {gap:?}");
+        assert!(
+            gap < Duration::from_millis(100),
+            "runtime blocked for {gap:?}"
+        );
     }
 }
