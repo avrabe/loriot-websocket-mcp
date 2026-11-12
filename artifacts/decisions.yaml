@@ -382,6 +382,8 @@ artifacts:
         target: REQ-WARN-004
       - type: satisfies
         target: REQ-WARN-005
+      - type: satisfies
+        target: REQ-WARN-006
       - type: traces-to
         target: REQ-WOHL-001
 

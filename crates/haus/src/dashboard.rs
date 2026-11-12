@@ -210,6 +210,7 @@ fn warn_icon(k: Kind) -> &'static str {
         Kind::TooCold | Kind::Frost => "❄️",
         Kind::TooWarm => "🔥",
         Kind::SensorSilent | Kind::SourceDown => "📡",
+        Kind::SensorStuck => "⏸️",
         Kind::BatteryLow => "🔋",
         Kind::HeatingAnomaly => "♨️",
     }
@@ -483,14 +484,17 @@ pub async fn warnings(state: &AppState) -> Vec<Warning> {
     let lv = live(state);
     let result = run_blocking(move || -> Result<Vec<Warning>, String> {
         let store = s.ingest.store();
-        let window = warn::window_ms(&s.warn);
         let mut data = Vec::new();
         for (id, meta) in store.series().map_err(|e| e.to_string())? {
-            // The window, and the value standing at its start.
-            let hold = chart::hold_ms(meta.key.source);
-            let recent = store
-                .range(id, now - window - hold, now)
-                .map_err(|e| e.to_string())?;
+            // The window, and the value standing at its start (however old:
+            // a sensor stuck for months has no point inside the window).
+            let from = now - warn::window_ms(&s.warn, &meta);
+            let mut recent: Vec<(i64, f64)> = store
+                .before(id, from)
+                .map_err(|e| e.to_string())?
+                .into_iter()
+                .collect();
+            recent.extend(store.range(id, from, now).map_err(|e| e.to_string())?);
             data.push(warn::SeriesData {
                 id,
                 latest: recent.last().copied(),
@@ -973,6 +977,46 @@ mod tests {
         let status = r.status();
         let body = axum::body::to_bytes(r.into_body(), 10 << 20).await.unwrap();
         (status, String::from_utf8_lossy(&body).into_owned())
+    }
+
+    // rivet: verifies REQ-WARN-006
+    #[tokio::test]
+    async fn warnings_see_the_value_standing_long_before_the_window() {
+        let state = test_state("dash-stuck", AppConfig::default());
+        let store = state.ingest.store().clone();
+        let meta = view(
+            9,
+            Source::Loxone,
+            Quantity::Temperature,
+            "Touch temperature",
+            Some("Bathroom"),
+            None,
+            0.0,
+        )
+        .meta;
+        let id = store.ensure_series(&meta).unwrap();
+        let now = chrono::Utc::now().timestamp_millis();
+        let day = 24 * 60 * MIN;
+        // Last real change 80 days ago, repeated at a reconnect an hour ago.
+        store
+            .write(&[
+                Point {
+                    series: id,
+                    ts_ms: now - 80 * day,
+                    value: 27.7,
+                },
+                Point {
+                    series: id,
+                    ts_ms: now - 60 * MIN,
+                    value: 27.7,
+                },
+            ])
+            .unwrap();
+        let w = warnings(&state).await;
+        let stuck: Vec<_> = w.iter().filter(|w| w.kind == Kind::SensorStuck).collect();
+        assert_eq!(stuck.len(), 1, "{w:?}");
+        assert_eq!(stuck[0].since_ms, Some(now - 80 * day));
+        assert!(!w.iter().any(|w| w.kind == Kind::TooWarm), "{w:?}");
     }
 
     #[tokio::test]

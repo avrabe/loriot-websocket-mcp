@@ -333,6 +333,21 @@ impl Store {
         Ok(out)
     }
 
+    /// The newest point of `series` with `ts < before_ms`: the value standing
+    /// when a window starts.
+    pub fn before(&self, series: SeriesId, before_ms: i64) -> StoreResult<Option<(i64, f64)>> {
+        let tx = self.db.begin_read()?;
+        let table = tx.open_table(POINTS)?;
+        let mut r = table.range((series, i64::MIN)..(series, before_ms))?;
+        Ok(match r.next_back() {
+            Some(row) => {
+                let (k, v) = row?;
+                Some((k.value().1, v.value()))
+            }
+            None => None,
+        })
+    }
+
     /// The newest point of `series`.
     pub fn latest(&self, series: SeriesId) -> StoreResult<Option<(i64, f64)>> {
         let tx = self.db.begin_read()?;
@@ -459,6 +474,31 @@ mod tests {
                 .ensure_series(&meta(Source::Loxone, "uuid-2", "Default", "x"))
                 .unwrap(),
             c
+        );
+        let _ = std::fs::remove_file(&path);
+    }
+
+    // rivet: verifies REQ-WARN-006
+    #[test]
+    fn before_is_the_value_standing_at_a_time_of_this_series_only() {
+        let path = tmp("before");
+        let store = Store::open(&path).unwrap();
+        let a = store
+            .ensure_series(&meta(Source::Loxone, "a", "f", "a"))
+            .unwrap();
+        let b = store
+            .ensure_series(&meta(Source::Loxone, "b", "f", "b"))
+            .unwrap();
+        store.write(&pts(a, &[(10, 1.0), (20, 2.0)])).unwrap();
+        store.write(&pts(b, &[(15, 9.0)])).unwrap();
+        assert_eq!(store.before(a, 10).unwrap(), None, "strictly before");
+        assert_eq!(store.before(a, 11).unwrap(), Some((10, 1.0)));
+        assert_eq!(store.before(a, 20).unwrap(), Some((10, 1.0)));
+        assert_eq!(store.before(a, i64::MAX).unwrap(), Some((20, 2.0)));
+        assert_eq!(
+            store.before(b, 15).unwrap(),
+            None,
+            "no point of another series"
         );
         let _ = std::fs::remove_file(&path);
     }

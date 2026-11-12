@@ -113,6 +113,7 @@ sends no notifications.
 | too cold / too warm | the room's air temperature below 16 °C or above 26 °C (median of its air sensors; floor probes, radiator and valve temperatures do not count) |
 | frost | below `frost_c` in rooms declared frost-only (cellar, garage) |
 | sensor silent / source down | a LoRaWAN sensor without a value for 60 min; a source not connected |
+| sensor stuck | a Loxone temperature or humidity unchanged for 72 h (`stuck_hours`): the Miniserver keeps repeating the last value of a sensor that stopped sending, e.g. on an empty battery. A stuck sensor is left out of the room's temperature, mould and heating rules |
 | battery low | below 2.6 V, or 20 % for batteries that report % |
 | heating anomaly | a valve at or above 50 % for 2 h while the room warmed less than 0.3 K |
 

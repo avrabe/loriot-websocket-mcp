@@ -32,6 +32,10 @@ pub struct Thresholds {
     pub valve_hours: f64,
     /// … while the room warmed by less than this, K.
     pub valve_min_rise_k: f64,
+    /// A Loxone temperature or humidity unchanged for this many hours is
+    /// stuck (a sensor that stopped sending, e.g. an empty battery: the
+    /// Miniserver keeps repeating its last value).
+    pub stuck_hours: f64,
 }
 
 impl Default for Thresholds {
@@ -47,6 +51,7 @@ impl Default for Thresholds {
             valve_open_pct: 50.0,
             valve_hours: 2.0,
             valve_min_rise_k: 0.3,
+            stuck_hours: 72.0,
         }
     }
 }
@@ -103,6 +108,7 @@ pub enum Kind {
     TooWarm,
     Frost,
     SensorSilent,
+    SensorStuck,
     SourceDown,
     BatteryLow,
     HeatingAnomaly,
@@ -130,10 +136,43 @@ pub struct SeriesData {
     pub recent: Vec<(i64, f64)>,
 }
 
-/// How far back the evaluator needs points, in ms.
-pub fn window_ms(cfg: &WarnConfig) -> i64 {
-    let h = cfg.defaults.mould_hours.max(cfg.defaults.valve_hours);
+/// How far back the evaluator needs points of `meta`'s series, in ms. The
+/// caller passes the points in the window plus the one standing at its start.
+pub fn window_ms(cfg: &WarnConfig, meta: &SeriesMeta) -> i64 {
+    let mut h = cfg.defaults.mould_hours.max(cfg.defaults.valve_hours);
+    if can_stick(meta) {
+        h = h.max(cfg.defaults.stuck_hours);
+    }
     ((h + 1.0) * 3_600_000.0) as i64
+}
+
+/// Series the stuck rule watches: Loxone temperatures and humidities (a
+/// LoRaWAN sensor that stops sending goes silent instead).
+fn can_stick(m: &SeriesMeta) -> bool {
+    m.key.source == Source::Loxone
+        && matches!(m.quantity, Quantity::Temperature | Quantity::Humidity)
+}
+
+/// When `s` has held its latest value for at least `hours`: since when, as
+/// far as its points show (the start of the unchanged run).
+fn stuck_since(s: &SeriesData, now_ms: i64, hours: f64) -> Option<i64> {
+    if !can_stick(&s.meta) {
+        return None;
+    }
+    let (_, v) = s.latest?;
+    let same = |x: f64| (x - v).abs() < 0.05;
+    let from = now_ms - (hours * 3_600_000.0) as i64;
+    if !held_since(&s.recent, from, same) {
+        return None;
+    }
+    let mut since = None;
+    for (t, x) in s.recent.iter().rev() {
+        if !same(*x) {
+            break;
+        }
+        since = Some(*t);
+    }
+    since
 }
 
 fn room_of(m: &SeriesMeta) -> &str {
@@ -207,8 +246,33 @@ pub fn evaluate(
     for s in series {
         rooms.entry(room_of(&s.meta)).or_default().push(s);
     }
-    for (room, ss) in &rooms {
+    for (room, all) in &rooms {
         let rs = cfg.rooms.get(*room).cloned().unwrap_or_default();
+        // A stuck series gets its own warning and takes no part in the room's
+        // climate rules: its value is old, whatever it says.
+        let mut ss: Vec<&SeriesData> = Vec::new();
+        for s in all {
+            match stuck_since(s, now_ms, d.stuck_hours) {
+                Some(since) => {
+                    let (_, v) = s.latest.expect("stuck has a latest value");
+                    out.push(Warning {
+                        kind: Kind::SensorStuck,
+                        room: room.to_string(),
+                        series: vec![s.id],
+                        message: format!(
+                            "{} unchanged at {v:.1}{}{} for over {} h: the sensor may have stopped (battery?); left out of the room's values",
+                            s.meta.name,
+                            if s.meta.unit.is_empty() { "" } else { " " },
+                            s.meta.unit,
+                            d.stuck_hours
+                        ),
+                        since_ms: Some(since),
+                    });
+                }
+                None => ss.push(s),
+            }
+        }
+        let ss = &ss;
         // Per-series rules.
         for s in ss {
             let Some((ts, v)) = s.latest else { continue };
@@ -679,6 +743,122 @@ mod tests {
         assert!(
             serde_json::from_str::<WarnConfig>(r#"{"rooms": {"Cellar": {"frost": 3}}}"#).is_err()
         );
-        assert!(window_ms(&c) >= 4 * H);
+        let meta = |src, q| SeriesMeta {
+            key: SeriesKey::new(src, "x", "f"),
+            quantity: q,
+            unit: String::new(),
+            name: "x".into(),
+            room: None,
+        };
+        assert!(window_ms(&c, &meta(Source::Loriot, Quantity::Temperature)) >= 4 * H);
+        assert!(window_ms(&c, &meta(Source::Loriot, Quantity::Temperature)) < 24 * H);
+        assert!(window_ms(&c, &meta(Source::Loxone, Quantity::Humidity)) >= 72 * H);
+        assert!(window_ms(&c, &meta(Source::Loxone, Quantity::ValvePosition)) < 24 * H);
+    }
+
+    // rivet: verifies REQ-WARN-006
+    // rivet: verifies DD-014
+    #[test]
+    fn a_loxone_sensor_unchanged_for_days_is_stuck_and_left_out_of_the_room() {
+        let cfg = WarnConfig::default();
+        let up = [(Source::Loxone, true), (Source::Loriot, true)];
+        const D: i64 = 24 * H;
+        // Standing since 80 days, repeated by the Miniserver at a reconnect.
+        let stuck = s(
+            1,
+            Source::Loxone,
+            Quantity::Temperature,
+            "Touch temperature",
+            "Bath",
+            "°C",
+            &[(NOW - 80 * D, 27.7), (NOW - H, 27.7)],
+        );
+        let alive = s(
+            2,
+            Source::Loxone,
+            Quantity::Temperature,
+            "Temperatur Heizkörper",
+            "Bath",
+            "°C",
+            &[(NOW - 4 * D, 18.0), (NOW - 2 * D, 18.6), (NOW - H, 18.5)],
+        );
+        let w = evaluate(&[stuck.clone(), alive.clone()], &up, NOW, &cfg);
+        assert_eq!(w.len(), 1, "{w:?}");
+        assert_eq!(w[0].kind, Kind::SensorStuck);
+        assert_eq!(w[0].series, vec![1]);
+        assert_eq!(w[0].since_ms, Some(NOW - 80 * D));
+        assert!(w[0].message.contains("27.7 °C"), "{}", w[0].message);
+        // Without the stuck rule its 27.7 °C would make the room too warm.
+        let mut never = cfg.clone();
+        never.defaults.stuck_hours = 1e9;
+        let w = evaluate(&[stuck.clone(), alive.clone()], &up, NOW, &never);
+        assert!(w.iter().any(|w| w.kind == Kind::TooWarm), "{w:?}");
+        // A stuck humidity raises no mould risk.
+        let wet = s(
+            3,
+            Source::Loxone,
+            Quantity::Humidity,
+            "Luftfeuchte",
+            "Bath",
+            "%",
+            &[(NOW - 10 * D, 80.0)],
+        );
+        let w = evaluate(&[wet], &up, NOW, &cfg);
+        assert_eq!(
+            w.iter().map(|w| w.kind).collect::<Vec<_>>(),
+            vec![Kind::SensorStuck]
+        );
+        // A change inside the window: not stuck. Exactly at the edge: stuck.
+        let moved = s(
+            4,
+            Source::Loxone,
+            Quantity::Temperature,
+            "T",
+            "Hall",
+            "°C",
+            &[(NOW - 80 * D, 20.0), (NOW - 71 * H, 20.4)],
+        );
+        assert!(evaluate(&[moved], &up, NOW, &cfg).is_empty());
+        let edge = s(
+            5,
+            Source::Loxone,
+            Quantity::Temperature,
+            "T",
+            "Hall",
+            "°C",
+            &[(NOW - 72 * H, 20.0)],
+        );
+        assert_eq!(evaluate(&[edge], &up, NOW, &cfg)[0].kind, Kind::SensorStuck);
+        // No point before the window (a new series): unknown, not stuck.
+        let young = s(
+            6,
+            Source::Loxone,
+            Quantity::Temperature,
+            "T",
+            "Hall",
+            "°C",
+            &[(NOW - 10 * H, 20.0)],
+        );
+        assert!(evaluate(&[young], &up, NOW, &cfg).is_empty());
+        // LoRaWAN goes silent instead; valves are not watched.
+        let lora = s(
+            7,
+            Source::Loriot,
+            Quantity::Temperature,
+            "T",
+            "Cellar",
+            "°C",
+            &[(NOW - 10 * D, 20.0), (NOW - 5 * 60_000, 20.0)],
+        );
+        let valve = s(
+            8,
+            Source::Loxone,
+            Quantity::ValvePosition,
+            "Valve",
+            "Hall",
+            "%",
+            &[(NOW - 10 * D, 0.0)],
+        );
+        assert!(evaluate(&[lora, valve], &up, NOW, &cfg).is_empty());
     }
 }
