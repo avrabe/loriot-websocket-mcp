@@ -384,3 +384,58 @@ artifacts:
     links:
       - type: traces-to
         target: REQ-WMBUS-001
+
+  # --- Backlog: house view, labels, shared Loxone protocol (owner, 2026-11-12) ---
+  - id: REQ-UI-006
+    type: requirement
+    title: A 3D view of the house with sensors in their rooms
+    status: draft
+    release: backlog
+    description: >
+      A page shows the building level by level (levels can be shown alone or
+      exploded), the rooms of each level, and each sensor in the room it
+      measures, coloured by its current value. The house model (levels,
+      rooms, polygons, sensor placement) is a file on the deployment
+      (HAUS_HOUSE_MODEL); it is private and never part of this repository,
+      which carries only the viewer and a made-up example model.
+    fields:
+      priority: could
+      category: functional
+    links:
+      - type: constraint-satisfies
+        target: SC-008
+
+  - id: REQ-UI-007
+    type: requirement
+    title: Readable sensor labels
+    status: draft
+    release: backlog
+    description: >
+      Labels come from what the sources say a sensor is (the Loxone structure
+      file's control name, room and category; devices.json for LoRaWAN),
+      without repeating the quantity or the room ("Temperature · Kitchen"
+      rather than "Temperature · Temperatur Küche"), and can be overridden
+      per series.
+    fields:
+      priority: should
+      category: functional
+    links:
+      - type: traces-to
+        target: REQ-UI-001
+
+  - id: REQ-LOX-004
+    type: requirement
+    title: One Loxone protocol implementation shared with mcp-loxone
+    status: draft
+    release: backlog
+    description: >
+      The Miniserver protocol pieces (token authentication, command
+      encryption, message framing, event tables, structure file) move into
+      a crate that haus and avrabe/mcp-loxone both use, so a protocol fix
+      lands once.
+    fields:
+      priority: could
+      category: constraint
+    links:
+      - type: traces-to
+        target: REQ-LOX-001
