@@ -18,6 +18,7 @@ pub fn current_timestamp_ms() -> u64 {
 
 pub mod analytics;
 pub mod chart;
+pub mod compare;
 pub mod energy;
 pub mod heatpump;
 pub mod import;

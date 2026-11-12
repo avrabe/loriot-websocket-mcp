@@ -107,6 +107,21 @@ Each import reads every point back from the store, and a Stats4Lox import
 also compares its counts with InfluxDB's own count in the manifest. Any
 difference makes it exit 1. Re-running an import stores nothing twice.
 
+### Replacing a Stats4Lox logger
+
+Before switching off a logger such as a LoxBerry with Stats4Lox, let haus
+receive from the Miniserver for a while. Then export the logger again and
+compare. Do this **before** importing that export:
+
+```sh
+haus compare stats4lox <fresh export> --since <when haus went live>
+haus import stats4lox <fresh export>     # afterwards: fills the history up to the switch-off
+```
+
+`compare` checks every Stats4Lox sample since `--since` against the value
+haus had at that time. It exits 1 on any difference, on any sample haus has
+no value for, and on any series haus does not have.
+
 ### Health check
 
 `GET /health` answers `200` whenever the process and its runtime are alive,
