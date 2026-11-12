@@ -58,6 +58,8 @@ jobs:
   # Traceability: rivet from the varve layer this repo pins (varve.toml), so CI
   # validates with exactly the rivet a developer gets. varve is installed from
   # its release with the checksum file's cosign signature checked first.
+  # rivet: verifies REQ-TRACE-001
+  # rivet: verifies DD-001
   rivet:
     name: rivet validate
     runs-on: ubuntu-24.04

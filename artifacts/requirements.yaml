@@ -8,7 +8,7 @@ artifacts:
   - id: REQ-NAME-001
     type: requirement
     title: The project, crates and binary are named haus
-    status: verified
+    status: implemented
     release: v0.4.0
     description: >
       loriot-websocket-mcp becomes haus. LORIOT (LoRaWAN) and Loxone are
@@ -21,7 +21,7 @@ artifacts:
   - id: REQ-TRACE-001
     type: requirement
     title: Artifacts are tracked with rivet and validated in CI
-    status: approved
+    status: verified
     release: v0.4.0
     description: >
       Requirements, decisions, the STPA analysis and tests live in artifacts/
@@ -313,6 +313,7 @@ artifacts:
     description: >
       Dropped by the owner on 2026-11-12; the unwired src/mcp_server.rs is
       removed in v0.4.0.
+    release: backlog
     fields:
       priority: wont
       category: interface
@@ -324,6 +325,7 @@ artifacts:
     description: >
       The 0.3.0 dashboard's other pages return one per release after v0.4.0,
       rebuilt in the server-rendered style.
+    release: backlog
     fields:
       priority: could
       category: functional
@@ -335,6 +337,7 @@ artifacts:
     description: >
       A later release publishes temperature and humidity streams to
       pulseengine/wohl so its monitors can alert (freeze, overheat, humidity).
+    release: backlog
     fields:
       priority: could
       category: interface
@@ -353,6 +356,7 @@ artifacts:
       deployment's configuration. A telegram that cannot be decoded (no
       driver, or encrypted without a key) is counted and reported per meter
       on the health page, never dropped silently.
+    release: backlog
     fields:
       priority: could
       category: functional
@@ -373,9 +377,65 @@ artifacts:
       a refresh token) that community clients use, so it may break whenever
       the portal changes. Only after REQ-WMBUS-001, and only if the radio path
       leaves a gap.
+    release: backlog
     fields:
       priority: could
       category: interface
     links:
       - type: traces-to
         target: REQ-WMBUS-001
+
+  # --- Backlog: house view, labels, shared Loxone protocol (owner, 2026-11-12) ---
+  - id: REQ-UI-006
+    type: requirement
+    title: A 3D view of the house with sensors in their rooms
+    status: draft
+    release: backlog
+    description: >
+      A page shows the building level by level (levels can be shown alone or
+      exploded), the rooms of each level, and each sensor in the room it
+      measures, coloured by its current value. The house model (levels,
+      rooms, polygons, sensor placement) is a file on the deployment
+      (HAUS_HOUSE_MODEL); it is private and never part of this repository,
+      which carries only the viewer and a made-up example model.
+    fields:
+      priority: could
+      category: functional
+    links:
+      - type: constraint-satisfies
+        target: SC-008
+
+  - id: REQ-UI-007
+    type: requirement
+    title: Readable sensor labels
+    status: draft
+    release: backlog
+    description: >
+      Labels come from what the sources say a sensor is (the Loxone structure
+      file's control name, room and category; devices.json for LoRaWAN),
+      without repeating the quantity or the room ("Temperature · Kitchen"
+      rather than "Temperature · Temperatur Küche"), and can be overridden
+      per series.
+    fields:
+      priority: should
+      category: functional
+    links:
+      - type: traces-to
+        target: REQ-UI-001
+
+  - id: REQ-LOX-004
+    type: requirement
+    title: One Loxone protocol implementation shared with mcp-loxone
+    status: draft
+    release: backlog
+    description: >
+      The Miniserver protocol pieces (token authentication, command
+      encryption, message framing, event tables, structure file) move into
+      a crate that haus and avrabe/mcp-loxone both use, so a protocol fix
+      lands once.
+    fields:
+      priority: could
+      category: constraint
+    links:
+      - type: traces-to
+        target: REQ-LOX-001

@@ -78,15 +78,15 @@ pub fn parse(args: &[String], env_store: Option<String>) -> Result<CompareArgs, 
                 tolerance = value("--tolerance")?
                     .parse::<f64>()
                     .ok()
-                    .filter(|t| t.is_finite() && *t >= 0.0)
-                    .ok_or("--tolerance must be a number >= 0")?
+                    .filter(|t| t.is_finite() && (0.0..=1.0).contains(t))
+                    .ok_or("--tolerance must be between 0 and 1")?
             }
             "--skew-seconds" => {
                 skew_ms = value("--skew-seconds")?
                     .parse::<i64>()
                     .ok()
-                    .filter(|s| (0..=3600).contains(s))
-                    .ok_or("--skew-seconds must be 0..3600")?
+                    .filter(|s| (0..=300).contains(s))
+                    .ok_or("--skew-seconds must be 0..300")?
                     * 1000
             }
             "--format" => match value("--format")?.as_str() {
@@ -131,7 +131,8 @@ pub fn run(a: &CompareArgs) -> i32 {
                     "{}",
                     serde_json::to_string_pretty(&serde_json::json!({
                         "ok": r.ok(), "samples": r.total_samples(),
-                        "series": r.series, "skipped": r.skipped, "problems": r.problems,
+                        "series": r.series, "not_compared": r.not_compared,
+                        "skipped": r.skipped, "problems": r.problems,
                     }))
                     .expect("report serialises")
                 );
@@ -166,6 +167,12 @@ fn print_text(r: &CompareReport) {
                 .map(|p| format!("  first: {p}"))
                 .unwrap_or_default()
         );
+    }
+    for n in &r.not_compared {
+        println!("not compared: {n}");
+    }
+    for n in &r.skipped {
+        println!("not compared (skipped by the reader): {n}");
     }
     for p in &r.problems {
         eprintln!("problem: {p}");
@@ -235,7 +242,15 @@ mod tests {
                 "--since",
                 "2026-11-20",
                 "--skew-seconds",
-                "99999",
+                "301",
+            ],
+            &[
+                "stats4lox",
+                "exp",
+                "--since",
+                "2026-11-20",
+                "--tolerance",
+                "2",
             ],
         ] {
             assert!(parse(&a(bad), None).is_err(), "{bad:?}");

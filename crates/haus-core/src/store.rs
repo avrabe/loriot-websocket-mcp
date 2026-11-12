@@ -26,6 +26,10 @@ const POINTS: TableDefinition<(u32, i64), f64> = TableDefinition::new("points");
 const SERIES_INDEX: TableDefinition<&str, u32> = TableDefinition::new("series_index");
 /// Series id → [`SeriesMeta`] as JSON.
 const SERIES_META: TableDefinition<u32, &str> = TableDefinition::new("series_meta");
+/// The points a source delivered live (not imported), same layout as
+/// POINTS. Lets `compare` check what haus itself received (REQ-RETIRE-001):
+/// imported points would otherwise match themselves.
+const LIVE: TableDefinition<(u32, i64), f64> = TableDefinition::new("live_points");
 
 /// Page cache used when none is given. redb's own default is 1 GiB, more than
 /// the whole service may use on a small host (REQ-RES-001).
@@ -206,6 +210,7 @@ impl Store {
         tx.open_table(POINTS)?;
         tx.open_table(SERIES_INDEX)?;
         tx.open_table(SERIES_META)?;
+        tx.open_table(LIVE)?;
         tx.commit()?;
         Ok(Self { db })
     }
@@ -255,10 +260,25 @@ impl Store {
         Ok(out)
     }
 
-    /// Store `points` in one transaction.
+    /// Store `points` in one transaction (imports).
     pub fn write(&self, points: &[Point]) -> StoreResult<WriteStats> {
+        self.write_inner(points, false)
+    }
+
+    /// Store `points` a source delivered live: also recorded as live.
+    pub fn write_live(&self, points: &[Point]) -> StoreResult<WriteStats> {
+        self.write_inner(points, true)
+    }
+
+    fn write_inner(&self, points: &[Point], live: bool) -> StoreResult<WriteStats> {
         let mut stats = WriteStats::default();
         let tx = self.db.begin_write()?;
+        if live {
+            let mut table = tx.open_table(LIVE)?;
+            for p in points {
+                table.insert((p.series, p.ts_ms), p.value)?;
+            }
+        }
         {
             let mut table = tx.open_table(POINTS)?;
             for p in points {
@@ -280,8 +300,28 @@ impl Store {
         from_ms: i64,
         to_ms: i64,
     ) -> StoreResult<Vec<(i64, f64)>> {
+        self.range_in(POINTS, series, from_ms, to_ms)
+    }
+
+    /// Like [`Self::range`], but only points delivered live.
+    pub fn range_live(
+        &self,
+        series: SeriesId,
+        from_ms: i64,
+        to_ms: i64,
+    ) -> StoreResult<Vec<(i64, f64)>> {
+        self.range_in(LIVE, series, from_ms, to_ms)
+    }
+
+    fn range_in(
+        &self,
+        def: TableDefinition<(u32, i64), f64>,
+        series: SeriesId,
+        from_ms: i64,
+        to_ms: i64,
+    ) -> StoreResult<Vec<(i64, f64)>> {
         let tx = self.db.begin_read()?;
-        let table = tx.open_table(POINTS)?;
+        let table = tx.open_table(def)?;
         let mut out = Vec::new();
         if from_ms > to_ms {
             return Ok(out);
@@ -366,6 +406,7 @@ mod tests {
     }
 
     // rivet: verifies REQ-MODEL-001
+    // rivet: verifies DD-005
     #[test]
     fn series_identity_is_the_key_not_the_name() {
         let path = tmp("identity");
@@ -436,6 +477,7 @@ mod tests {
     }
 
     // rivet: partially-verifies REQ-STORE-001
+    // rivet: verifies DD-003
     #[test]
     fn range_reads_one_series_inclusive_and_ordered() {
         let path = tmp("range");
@@ -515,10 +557,18 @@ mod tests {
                 changed: 0
             }
         );
+        // Imported points are not live; live ones are both.
+        assert!(store.range_live(a, i64::MIN, i64::MAX).unwrap().is_empty());
+        store.write_live(&pts(a, &[(5, 22.0)])).unwrap();
+        assert_eq!(
+            store.range_live(a, i64::MIN, i64::MAX).unwrap(),
+            vec![(5, 22.0)]
+        );
+        assert_eq!(store.count(a, i64::MIN, i64::MAX).unwrap(), 5);
         // A different value at a stored time is reported, not silent.
         let altered = store.write(&pts(a, &[(2, 99.0)])).unwrap();
         assert_eq!(altered.changed, 1);
-        assert_eq!(store.count(a, i64::MIN, i64::MAX).unwrap(), 4);
+        assert_eq!(store.count(a, i64::MIN, i64::MAX).unwrap(), 5);
         let _ = std::fs::remove_file(&path);
     }
 }

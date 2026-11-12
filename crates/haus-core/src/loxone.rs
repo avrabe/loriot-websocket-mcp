@@ -667,6 +667,7 @@ mod tests {
     }
 
     // rivet: verifies REQ-LOX-002
+    // rivet: verifies DD-012
     #[test]
     fn the_command_set_is_the_allow_list_and_hides_secrets() {
         let all = [

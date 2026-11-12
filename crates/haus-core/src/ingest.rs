@@ -99,7 +99,7 @@ impl Ingestor {
                 });
             }
         }
-        self.store.write(&points)
+        self.store.write_live(&points)
     }
 }
 

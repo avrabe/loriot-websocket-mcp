@@ -232,3 +232,41 @@ artifacts:
     links:
       - type: prevents
         target: H-007
+
+  - id: L-005
+    type: loss
+    title: Private information about the home becomes public
+    status: draft
+    description: >
+      The location, plans, rooms, devices or habits of the household become
+      readable by anyone, through this public repository, its issues, pull
+      requests, commit history or release assets.
+    fields:
+      stakeholders: [owner, household]
+
+  - id: H-008
+    type: hazard
+    title: Deployment or home data is committed to the public repository
+    status: draft
+    description: >
+      Host names, addresses, coordinates, floor plans, room and sensor names,
+      device ids, keys or measurements from the real home reach a commit,
+      issue or pull request of the public repository.
+    fields:
+      severity: marginal
+    links:
+      - type: leads-to-loss
+        target: L-005
+
+  - id: SC-008
+    type: system-constraint
+    title: Home data lives only on the deployment
+    status: draft
+    description: >
+      Everything specific to the real home is configuration or data on the
+      deployment (managed in the private deployment repository); the public
+      repository holds code, generic documentation and synthetic test data
+      only, and every change is checked for home data before it is pushed.
+    links:
+      - type: prevents
+        target: H-008

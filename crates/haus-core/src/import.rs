@@ -676,6 +676,7 @@ mod tests {
     }
 
     // rivet: verifies REQ-IMPORT-002
+    // rivet: verifies DD-006
     #[test]
     fn stats4lox_import_matches_influx_counts_and_takes_a_delta() {
         let d = tmpdir("s4l-ok");
@@ -929,6 +930,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
+    // rivet: partially-verifies REQ-MODEL-001
     #[test]
     fn loxone_quantities_from_category_and_name() {
         assert_eq!(loxone_quantity("Temperatur", "x").0, Quantity::Temperature);

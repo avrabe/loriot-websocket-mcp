@@ -105,6 +105,18 @@ fn bind_host(bind: Option<String>, host: Option<String>) -> String {
         .unwrap_or_else(|| "0.0.0.0".to_string())
 }
 
+/// The log filter: RUST_LOG, else the default, with the websocket library
+/// capped at warn whatever RUST_LOG says. At debug/trace it logs whole
+/// frames, and a Miniserver token response is a frame (REQ-LOX-002).
+fn log_filter(rust_log: Option<&str>) -> tracing_subscriber::EnvFilter {
+    let base = rust_log
+        .filter(|s| !s.trim().is_empty())
+        .and_then(|s| tracing_subscriber::EnvFilter::try_new(s).ok())
+        .unwrap_or_else(|| tracing_subscriber::EnvFilter::new(DEFAULT_LOG_FILTER));
+    base.add_directive("tungstenite=warn".parse().expect("valid directive"))
+        .add_directive("tokio_tungstenite=warn".parse().expect("valid directive"))
+}
+
 /// Default log filter when RUST_LOG is unset.
 const DEFAULT_LOG_FILTER: &str = "haus=debug,tower_http=info";
 
@@ -188,10 +200,7 @@ async fn run() -> anyhow::Result<()> {
     // Initialize tracing
     tracing_subscriber::registry()
         .with(tracing_subscriber::fmt::layer())
-        .with(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| DEFAULT_LOG_FILTER.into()),
-        )
+        .with(log_filter(std::env::var("RUST_LOG").ok().as_deref()))
         .init();
 
     // Load configuration from environment
@@ -347,6 +356,22 @@ mod tests {
         assert_eq!(parse_args(args(&[])), Cli::Run);
     }
 
+    // rivet: partially-verifies REQ-LOX-002
+    #[test]
+    fn websocket_frames_are_never_logged() {
+        for env in [
+            None,
+            Some("trace"),
+            Some("tungstenite=trace,haus=trace"),
+            Some(""),
+        ] {
+            let f = log_filter(env).to_string();
+            assert!(f.contains("tungstenite=warn"), "{env:?}: {f}");
+            assert!(f.contains("tokio_tungstenite=warn"), "{env:?}: {f}");
+            assert!(!f.contains("tungstenite=trace"), "{env:?}: {f}");
+        }
+    }
+
     #[test]
     fn bind_host_precedence() {
         let s = |v: &str| Some(v.to_string());
@@ -413,6 +438,7 @@ mod tests {
     }
 
     // rivet: verifies REQ-HEALTH-001
+    // rivet: verifies DD-011
     #[tokio::test]
     async fn health_is_ok_and_reports_every_source() {
         let state = crate::state::tests::test_state("health", AppConfig::default());
