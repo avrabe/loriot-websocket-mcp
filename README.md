@@ -48,7 +48,7 @@ fill the journal.
 |-------------------------|---------|
 | `assets/`               | the dashboard (see below); read only |
 | `sensor_history.jsonl`  | every sensor reading, one JSON object per line, append-only |
-| `devices.json`          | optional EUI → display name map, e.g. `{"A840410A618A0320": "Kitchen"}` |
+| `devices.json`          | optional EUI → display name map, e.g. `{"0011223344556677": "Kitchen"}` |
 | `weather_history.jsonl` | fetched DWD daily weather |
 | `weather_location.json` | configured weather location |
 | `energy_data.json`      | energy / consumption data entered in the dashboard |
@@ -211,3 +211,19 @@ The MCP server uses:
 ## License
 
 MIT (see `license` in `Cargo.toml`).
+
+## Traceability and toolchain
+
+Requirements, design decisions and the STPA analysis (losses, hazards, system
+constraints) live in `artifacts/` and are validated by
+[rivet](https://github.com/pulseengine/rivet). The plan for the next release
+(v0.4.0, the move to `haus` with Loxone as a second source) is scoped there:
+
+```sh
+rivet validate
+rivet release status v0.4.0
+```
+
+rivet comes from the toolchain layer pinned in `varve.toml` (realm `covalent`,
+roots in `varve-realms.toml`); `varve install` fetches and verifies it. CI runs
+`rivet validate` the same way.

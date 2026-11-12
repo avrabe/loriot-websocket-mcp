@@ -1,0 +1,374 @@
+artifacts:
+  # ============================================================
+  # haus v0.4.0: LoRaWAN + Loxone climate history in one place.
+  # Decided with the owner 2026-11-12.
+  # ============================================================
+
+  # --- Project ---
+  - id: REQ-NAME-001
+    type: requirement
+    title: The project, crates and binary are named haus
+    status: draft
+    release: v0.4.0
+    description: >
+      loriot-websocket-mcp becomes haus. LORIOT (LoRaWAN) and Loxone are
+      sources inside it. The version line continues at 0.4.0 so existing
+      deployments see one continuous history.
+    fields:
+      priority: must
+      category: constraint
+
+  - id: REQ-TRACE-001
+    type: requirement
+    title: Artifacts are tracked with rivet and validated in CI
+    status: draft
+    release: v0.4.0
+    description: >
+      Requirements, decisions, the STPA analysis and tests live in artifacts/
+      and `rivet validate` runs in CI on every pull request, with rivet taken
+      from the varve-pinned layer.
+    fields:
+      priority: must
+      category: constraint
+
+  # --- Data model and storage ---
+  - id: REQ-MODEL-001
+    type: requirement
+    title: One data model for every source
+    status: draft
+    release: v0.4.0
+    description: >
+      Readings are stored as source → sensor → series. A sensor has a source
+      (loriot, loxone), a stable source id (EUI, UUID), a room and a display
+      name. Series kinds include temperature, humidity, battery voltage, motion,
+      and heating state: valve position, room controller state, pump state.
+    fields:
+      priority: must
+      category: functional
+    links:
+      - type: constraint-satisfies
+        target: SC-004
+
+  - id: REQ-STORE-001
+    type: requirement
+    title: The full history is stored durably and queried without stalling
+    status: draft
+    release: v0.4.0
+    description: >
+      All points of all series are kept on disk. Range queries read only the
+      requested range; no request reads the whole history, and no file IO runs
+      on the async runtime.
+    fields:
+      priority: must
+      category: functional
+    links:
+      - type: constraint-satisfies
+        target: SC-006
+
+  - id: REQ-RES-001
+    type: requirement
+    title: Resource budget on a Raspberry Pi 4 class host
+    status: draft
+    release: v0.4.0
+    description: >
+      With about 10M stored points, haus stays under 512 MB of memory on a
+      Raspberry Pi 4 class host, and a 90-day chart page renders in under 1 s
+      there. Measured on that hardware, not on a laptop.
+    fields:
+      priority: must
+      category: non-functional
+    links:
+      - type: constraint-satisfies
+        target: SC-006
+
+  # --- Import ---
+  - id: REQ-IMPORT-001
+    type: requirement
+    title: Import the LoRaWAN history with a count check
+    status: draft
+    release: v0.4.0
+    description: >
+      `haus import loriot <sensor_history.jsonl>` stores every reading. It fails
+      if the per-device, per-field count stored differs from the count in the
+      file. Re-running it stores nothing twice.
+    fields:
+      priority: must
+      category: functional
+    links:
+      - type: constraint-satisfies
+        target: SC-001
+
+  - id: REQ-IMPORT-002
+    type: requirement
+    title: Import the Stats4Lox export with a count check
+    status: draft
+    release: v0.4.0
+    description: >
+      `haus import stats4lox <dir>` reads a Stats4Lox InfluxDB export
+      (manifest.json plus <measurement>/<YYYY-MM>.jsonl.gz), keys each series by
+      the point's `uuid`, skips telegraf `internal_*` measurements, and fails if
+      the stored count per measurement and field differs from the manifest's
+      `influx_counts`. Points already stored (same uuid and timestamp) are not
+      stored again, so a later delta export can be imported over the full one.
+    fields:
+      priority: must
+      category: functional
+    links:
+      - type: constraint-satisfies
+        target: SC-001
+      - type: constraint-satisfies
+        target: SC-004
+
+  # --- Live sources ---
+  - id: REQ-LORIOT-001
+    type: requirement
+    title: LORIOT websocket ingestion keeps its current guarantees
+    status: draft
+    release: v0.4.0
+    description: >
+      The existing client's behaviour carries over: bounded handshake and
+      writes, ping every 30 s, a connection silent for 75 s counts as dead,
+      reconnect with exponential backoff and jitter.
+    fields:
+      priority: must
+      category: functional
+    links:
+      - type: constraint-satisfies
+        target: SC-007
+
+  - id: REQ-LOX-001
+    type: requirement
+    title: Live Loxone values from the Miniserver websocket
+    status: draft
+    release: v0.4.0
+    description: >
+      haus connects to the Miniserver's websocket with token authentication,
+      enables binary status updates, and stores value events for the state
+      UUIDs of the configured sensors (at least every series Stats4Lox
+      recorded). Events for UUIDs not configured are ignored.
+    fields:
+      priority: must
+      category: functional
+    links:
+      - type: constraint-satisfies
+        target: SC-004
+      - type: constraint-satisfies
+        target: SC-007
+
+  - id: REQ-LOX-002
+    type: requirement
+    title: The Miniserver connection is read-only and its credentials secret
+    status: draft
+    release: v0.4.0
+    description: >
+      Credentials come only from the service's environment file. They never
+      appear in
+      logs, pages, API responses or URLs. haus sends no command that changes
+      a control's state.
+    fields:
+      priority: must
+      category: constraint
+    links:
+      - type: constraint-satisfies
+        target: SC-005
+
+  - id: REQ-LOX-003
+    type: requirement
+    title: The Miniserver connection recovers and reports its state
+    status: draft
+    release: v0.4.0
+    description: >
+      Keep-alive, silent-connection detection, token refresh and reconnect with
+      backoff, as for LORIOT.
+    fields:
+      priority: must
+      category: functional
+    links:
+      - type: constraint-satisfies
+        target: SC-007
+
+  - id: REQ-HEALTH-001
+    type: requirement
+    title: /health reports every source
+    status: draft
+    release: v0.4.0
+    description: >
+      GET /health answers 200 while the process lives and carries, per source,
+      connected and last_message_at, so a watchdog or a monitor can see a dead
+      source without restarting the service in a loop.
+    fields:
+      priority: must
+      category: interface
+    links:
+      - type: constraint-satisfies
+        target: SC-007
+
+  # --- Dashboard ---
+  - id: REQ-UI-001
+    type: requirement
+    title: Overview of all rooms
+    status: draft
+    release: v0.4.0
+    description: >
+      One page lists every room with its latest temperature, humidity and
+      heating state, each with its age, grouped by room across sources.
+    fields:
+      priority: must
+      category: functional
+    links:
+      - type: constraint-satisfies
+        target: SC-003
+
+  - id: REQ-UI-002
+    type: requirement
+    title: Sensor detail with trends
+    status: draft
+    release: v0.4.0
+    description: >
+      Per sensor, server-rendered SVG trends for 1 h, 24 h, 7 d and 90 d,
+      bucketed to a fixed number of columns, with a gap drawn as a break.
+    fields:
+      priority: must
+      category: functional
+    links:
+      - type: constraint-satisfies
+        target: SC-003
+
+  - id: REQ-UI-003
+    type: requirement
+    title: Health page for sensors and sources
+    status: draft
+    release: v0.4.0
+    description: >
+      Connection state per source, last value age per sensor, battery voltage
+      and status for battery-powered sensors.
+    fields:
+      priority: must
+      category: functional
+    links:
+      - type: constraint-satisfies
+        target: SC-003
+      - type: constraint-satisfies
+        target: SC-007
+
+  - id: REQ-UI-004
+    type: requirement
+    title: The dashboard builds without wasm or npm
+    status: draft
+    release: v0.4.0
+    description: >
+      Pages are rendered by the server; the only browser script is vendored htmx
+      (and SSE). The release builds with cargo alone.
+    fields:
+      priority: must
+      category: constraint
+
+  # --- Release and retirement ---
+  - id: REQ-DEPLOY-001
+    type: requirement
+    title: A signed linux-arm64 release that deployment tooling can verify
+    status: draft
+    release: v0.4.0
+    description: >
+      Tags build static binaries with SHA256SUMS.txt signed by cosign (keyless,
+      release workflow identity) and an SBOM, as for 0.3.0, so deployment
+      tooling can verify the release and pin the binary's sha256.
+    fields:
+      priority: must
+      category: constraint
+
+  - id: REQ-RETIRE-001
+    type: requirement
+    title: Compare haus against a Stats4Lox logger it replaces
+    status: draft
+    release: v0.4.0
+    description: >
+      `haus compare stats4lox <dir>` reports, per series, whether haus's value
+      at each Stats4Lox sample time agrees with the exported value. haus
+      receives every change while Stats4Lox samples on a fixed interval, so
+      the comparison is by value at sample time, not by count. Together with
+      the delta import of REQ-IMPORT-002 this is the evidence an operator needs
+      before switching a Stats4Lox logger off.
+    fields:
+      priority: must
+      category: constraint
+    links:
+      - type: constraint-satisfies
+        target: SC-002
+      - type: traces-to
+        target: REQ-IMPORT-002
+
+  # --- Out of scope for v0.4.0 (recorded so the decision is visible) ---
+  - id: REQ-MCP-001
+    type: requirement
+    title: MCP query interface
+    status: draft
+    description: >
+      Dropped by the owner on 2026-11-12; the unwired src/mcp_server.rs is
+      removed in v0.4.0.
+    fields:
+      priority: wont
+      category: interface
+
+  - id: REQ-UI-005
+    type: requirement
+    title: Weather, heat pump, thermal, forecast and energy pages
+    status: draft
+    description: >
+      The 0.3.0 dashboard's other pages return one per release after v0.4.0,
+      rebuilt in the server-rendered style.
+    fields:
+      priority: could
+      category: functional
+
+  - id: REQ-WOHL-001
+    type: requirement
+    title: Feed readings to wohl's monitors
+    status: draft
+    description: >
+      A later release publishes temperature and humidity streams to
+      pulseengine/wohl so its monitors can alert (freeze, overheat, humidity).
+    fields:
+      priority: could
+      category: interface
+
+  # --- Later: wireless M-Bus meters (heat meters, heat cost allocators) ---
+  - id: REQ-WMBUS-001
+    type: requirement
+    title: Wireless M-Bus meters as a source
+    status: draft
+    description: >
+      haus reads wireless M-Bus meters through wmbusmeters' JSON output
+      (stdout or MQTT): heat meters (energy in kWh, current and previous
+      billing period) and heat cost allocators (consumption units, room and
+      radiator temperature where the meter sends them). Series are keyed by
+      manufacturer and meter id. Meter ids and AES keys come only from the
+      deployment's configuration. A telegram that cannot be decoded (no
+      driver, or encrypted without a key) is counted and reported per meter
+      on the health page, never dropped silently.
+    fields:
+      priority: could
+      category: functional
+    links:
+      - type: constraint-satisfies
+        target: SC-004
+      - type: constraint-satisfies
+        target: SC-007
+
+  - id: REQ-TECHEM-001
+    type: requirement
+    title: Monthly consumption from the Techem tenant portal
+    status: draft
+    description: >
+      Optional cross-check for the billing-relevant monthly values (kWh,
+      allocator units, m3) that the Techem tenant portal shows. There is no
+      public API; access would follow the browser login (OAuth2 with PKCE and
+      a refresh token) that community clients use, so it may break whenever
+      the portal changes. Only after REQ-WMBUS-001, and only if the radio path
+      leaves a gap.
+    fields:
+      priority: could
+      category: interface
+    links:
+      - type: traces-to
+        target: REQ-WMBUS-001
