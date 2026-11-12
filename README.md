@@ -62,8 +62,8 @@ never stall the server.
 
 ### The Loxone source
 
-With `LOXONE_URL` set, haus connects to the Miniserver's websocket, exchanges
-an AES session key, and authenticates with its stored token. It uses the
+With `LOXONE_URL` set, haus fetches the Miniserver's public key over HTTP(S)
+(same host and port), connects to its websocket, exchanges an AES session key, and authenticates with its stored token. It uses the
 password only to acquire a token, and token commands are always sent
 encrypted. It then loads the structure file and listens for value events. It
 sends only an allow-listed set of read commands; nothing that switches or

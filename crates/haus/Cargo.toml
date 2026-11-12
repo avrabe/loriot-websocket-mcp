@@ -20,6 +20,8 @@ tower-http = { version = "0.6", features = ["cors", "trace"] }
 # Async runtime
 tokio = { version = "1", features = ["full"] }
 tokio-tungstenite = { version = "0.28", features = ["rustls-tls-webpki-roots"] }
+# The Loxone public key comes over HTTP(S), not the websocket.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 futures = "0.3"
 
