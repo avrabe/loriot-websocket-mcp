@@ -26,17 +26,23 @@ artifacts:
   - id: DD-002
     type: design-decision
     title: Server-rendered htmx dashboard, as warte does it
-    status: approved
+    status: implemented
     description: >
       Pages rendered on the server with htmx and SSE; trends as server-drawn SVG; no wasm or npm.
     release: v0.4.0
     fields:
       decision: >
         axum handlers render HTML from include_str! templates; vendored htmx
-        swaps partials; SSE pushes refreshes; trends are SVG paths drawn on the
-        server, bucketed, restarting the path after every gap
-        (pulseengine/warte src/dashboard, charts.rs). The loriot-web crate
-        (Leptos, trunk, tailwind, npm) is removed.
+        2.0.4 (sha256 equal to the published file) re-fetches the overview
+        partial every 30 s; trends are SVG paths drawn on the server over 240
+        columns, restarting the path after every gap (after
+        pulseengine/warte src/dashboard, charts.rs). An empty column repeats
+        the last value while it is younger than the source's hold (LoRaWAN
+        30 min, Loxone 24 h, as Loxone sends only changes) and is a gap after
+        that. The overview leaves out series silent for over 30 days; the
+        status page lists everything, oldest first. The loriot-web crate
+        (Leptos, trunk, tailwind, npm) is removed. Polling instead of SSE: one
+        request every 30 s per open page, and no second script.
       rationale: >
         One binary with no wasm or node toolchain in the build or the release;
         the page is a function of the stored data, so a test can assert what a
