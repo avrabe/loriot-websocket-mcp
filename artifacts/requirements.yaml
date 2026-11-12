@@ -427,17 +427,23 @@ artifacts:
   - id: REQ-UI-006
     type: requirement
     title: A 3D view of the house with sensors in their rooms
-    status: draft
-    release: backlog
+    status: approved
+    release: v0.5.0
     description: >
       A page shows the building level by level (levels can be shown alone or
       exploded), the rooms of each level, and each sensor in the room it
-      measures, coloured by its current value. The house model (levels,
-      rooms, polygons, sensor placement) is a file on the deployment
-      (HAUS_HOUSE_MODEL); it is private and never part of this repository,
-      which carries only the viewer and a made-up example model.
+      measures, coloured by its current value. Beyond the owner's rooms it
+      shows the rest of the building (other units and shared rooms as
+      neutral floors), outdoor areas such as terraces with the devices the
+      home controller lists for them, an optional shell of walls and roofs,
+      and the surroundings (parcel, streets, neighbouring buildings, trees),
+      with fixed viewpoints. Labels never cover each other. The house model
+      (levels, rooms, polygons, massing, site, sensor placement) is a file
+      on the deployment (HAUS_HOUSE_MODEL); it is private and never part of
+      this repository, which carries only the viewer and a made-up example
+      model.
     fields:
-      priority: could
+      priority: must
       category: functional
     links:
       - type: constraint-satisfies
