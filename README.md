@@ -39,6 +39,7 @@ LORIOT_WS_TOKEN=... BIND=127.0.0.1 PORT=3000 ./haus
 | `LOXONE_USER`, `LOXONE_PASSWORD` | (required with `LOXONE_URL`) | a Miniserver user; read only from the environment |
 | `LOXONE_TOKEN_FILE` | `loxone-token.json`          | where the Miniserver token is kept (written with mode 0600) |
 | `LOXONE_MAP`      | (none)                         | JSON `{"<control uuid>/<field>": "<state name or state uuid>"}` for fields other than `Default` |
+| `LOXONE_KEY_SHA256` | (trust on first use)         | SHA-256 of the Miniserver's public key; a different key is refused before any login |
 | `BIND`            | `HOST`, else `0.0.0.0`         | listen address, e.g. `127.0.0.1` behind a reverse proxy |
 | `PORT`            | `3000`                         | listen port |
 | `RUST_LOG`        | `haus=debug,tower_http=info`   | log filter ([`EnvFilter`](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html) syntax) |
@@ -69,6 +70,13 @@ password only to acquire a token, and token commands are always sent
 encrypted. It then loads the structure file and listens for value events. It
 sends only an allow-listed set of read commands; nothing that switches or
 sets anything in the home.
+
+Over plain `ws://` the session is only as trustworthy as the Miniserver's
+public key, so haus pins it. Either set `LOXONE_KEY_SHA256` or, without it,
+haus trusts the first key it sees and remembers it in the token file. A
+different key later is refused before anything derived from the credentials
+is sent. Prefer `wss://` where the Miniserver supports TLS. A Miniserver user
+without control rights limits what a stolen token could do.
 
 Events are stored for the Loxone series the store already has, normally the
 ones a Stats4Lox import created, keyed by control UUID and field. A field

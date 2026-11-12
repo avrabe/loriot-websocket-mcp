@@ -13,8 +13,8 @@ use crate::state::{run_blocking, AppState};
 use futures::{SinkExt, StreamExt};
 use haus_core::ingest::Item;
 use haus_core::loxone::{
-    hmac_hex, parse_value_events, password_hash, resolve_states, Cmd, HashAlg, Header, LoxUuid,
-    MsgKind, Response, Secret, Session, LOXONE_EPOCH_UNIX_S,
+    hmac_hex, parse_value_events, password_hash, public_key_sha256, resolve_states, Cmd, HashAlg,
+    Header, LoxUuid, MsgKind, Response, Secret, Session, LOXONE_EPOCH_UNIX_S,
 };
 use haus_core::store::{SeriesMeta, Source};
 use std::collections::HashMap;
@@ -45,6 +45,9 @@ pub struct LoxoneConfig {
     pub token_file: PathBuf,
     /// Optional `{"uuid/field": "stateName or state uuid"}` overrides.
     pub overrides: HashMap<String, String>,
+    /// SHA-256 (hex) of the Miniserver's public key. Without it the first
+    /// key seen is trusted and remembered in the token file.
+    pub key_pin: Option<String>,
     pub keepalive: Duration,
     pub silence: Duration,
     pub request_timeout: Duration,
@@ -79,6 +82,7 @@ impl LoxoneConfig {
                 .unwrap_or_else(|| "loxone-token.json".into())
                 .into(),
             overrides,
+            key_pin: var("LOXONE_KEY_SHA256").map(|k| normalize_fingerprint(&k)),
             ..Self::defaults()
         }))
     }
@@ -90,6 +94,7 @@ impl LoxoneConfig {
             password: Secret::new(""),
             token_file: PathBuf::new(),
             overrides: HashMap::new(),
+            key_pin: None,
             keepalive: Duration::from_secs(60),
             silence: Duration::from_secs(150),
             request_timeout: Duration::from_secs(20),
@@ -108,6 +113,25 @@ struct StoredToken {
     valid_until: i64,
     /// Identifies haus to the Miniserver across token requests.
     client_uuid: String,
+    /// SHA-256 of the Miniserver public key this token was obtained under.
+    #[serde(default)]
+    key_sha256: Option<String>,
+}
+
+/// `AB:cd:…` or `abcd…` to lowercase hex without separators.
+fn normalize_fingerprint(s: &str) -> String {
+    s.chars()
+        .filter(|c| c.is_ascii_hexdigit())
+        .collect::<String>()
+        .to_lowercase()
+}
+
+/// The key the Miniserver must present: the configured pin, else the one
+/// remembered from the first connection.
+fn expected_key(cfg: &LoxoneConfig) -> Option<String> {
+    cfg.key_pin
+        .clone()
+        .or_else(|| load_token(cfg).and_then(|t| t.key_sha256))
 }
 
 fn now_loxone_s() -> i64 {
@@ -148,6 +172,12 @@ pub async fn run_loxone_connection(state: AppState, cfg: LoxoneConfig) {
         .loxone
         .as_ref()
         .expect("loxone source enabled in Sources");
+    if cfg.url.starts_with("ws://") && cfg.key_pin.is_none() {
+        tracing::warn!(
+            "Loxone: plain ws:// without LOXONE_KEY_SHA256: the Miniserver's public key \
+             is trusted on first use; prefer wss:// or pin the key"
+        );
+    }
     let mut attempt: u32 = 0;
     loop {
         attempt = attempt.saturating_add(1);
@@ -286,7 +316,11 @@ impl Conn<'_> {
     }
 
     /// Authenticate the socket: the stored token if it works, else a new one.
-    async fn authenticate(&mut self, session: &Session) -> Result<StoredToken, BoxError> {
+    async fn authenticate(
+        &mut self,
+        session: &Session,
+        key_sha256: &str,
+    ) -> Result<StoredToken, BoxError> {
         if let Some(t) = load_token(self.cfg).filter(|t| t.valid_until > now_loxone_s() + 3600) {
             let (key, _, alg) = self.getkey2().await?;
             let hash = Secret::new(hmac_hex(alg, &key, &t.token)?);
@@ -297,6 +331,11 @@ impl Conn<'_> {
             match self.request(&cmd, Some(session)).await {
                 Ok(_) => {
                     tracing::info!("Loxone: authenticated with the stored token");
+                    let mut t = t;
+                    if t.key_sha256.is_none() {
+                        t.key_sha256 = Some(key_sha256.to_string());
+                        save_token(self.cfg, &t)?;
+                    }
                     return Ok(t);
                 }
                 Err(e) => {
@@ -332,6 +371,7 @@ impl Conn<'_> {
                 .as_i64()
                 .ok_or("getjwt: no validUntil")?,
             client_uuid,
+            key_sha256: Some(key_sha256.to_string()),
         };
         save_token(self.cfg, &t)?;
         tracing::info!("Loxone: new token acquired");
@@ -397,10 +437,24 @@ async fn session(state: &AppState, cfg: &LoxoneConfig) -> Result<(), BoxError> {
         .as_str()
         .ok_or("getPublicKey: no key")?
         .to_string();
+    // Refuse a Miniserver whose key is not the pinned or remembered one
+    // before anything derived from the credentials is sent (a host on the
+    // path could otherwise read the session and relay or attack the login).
+    let key_sha256 = public_key_sha256(&pem)?;
+    if let Some(want) = expected_key(cfg) {
+        if want != key_sha256 {
+            return Err(format!(
+                "the Miniserver presented public key sha256 {key_sha256}, expected {want}; \
+                 refusing to authenticate (set LOXONE_KEY_SHA256 or remove the token file \
+                 if the Miniserver's key really changed)"
+            )
+            .into());
+        }
+    }
     let sess = Session::random();
     c.request(&Cmd::KeyExchange(sess.encrypted_key(&pem)?), None)
         .await?;
-    let mut token = c.authenticate(&sess).await?;
+    let mut token = c.authenticate(&sess, &key_sha256).await?;
     if token.valid_until - now_loxone_s() < REFRESH_BEFORE_S {
         c.refresh(&sess, &mut token).await?;
     }
@@ -743,6 +797,7 @@ mod tests {
             password: Secret::new(password),
             token_file,
             overrides: HashMap::from([(format!("{ROOM}/HCm"), "tempTarget".to_string())]),
+            key_pin: None,
             keepalive: Duration::from_millis(100),
             silence: Duration::from_millis(400),
             request_timeout: Duration::from_secs(5),
@@ -928,6 +983,64 @@ mod tests {
             assert_eq!(jwt, 1);
             let _ = std::fs::remove_file(&token_file);
         }
+    }
+
+    // rivet: verifies REQ-LOX-002
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_different_miniserver_key_is_refused_before_any_login() {
+        // First contact with A: its key is remembered with the token.
+        let a = Fake::new(After::Stay).await;
+        let url_a = serve(a.clone()).await;
+        let st = lox_state("lox-pin");
+        let token_file = tmp_file("pin");
+        let task = tokio::spawn(run_loxone_connection(
+            st.clone(),
+            config(url_a, PASSWORD, token_file.clone()),
+        ));
+        wait_for("a token", || token_file.exists()).await;
+        task.abort();
+        let saved: StoredToken =
+            serde_json::from_str(&std::fs::read_to_string(&token_file).unwrap()).unwrap();
+        assert_eq!(
+            saved.key_sha256.unwrap(),
+            public_key_sha256(&a.pem).unwrap()
+        );
+
+        // B (another key, e.g. a host on the path) at the address: refused.
+        let b = Fake::new(After::Stay).await;
+        let url_b = serve(b.clone()).await;
+        let st = lox_state("lox-pin-b");
+        let task = tokio::spawn(run_loxone_connection(
+            st.clone(),
+            config(url_b.clone(), PASSWORD, token_file.clone()),
+        ));
+        wait_for("two attempts at B", || *b.accepts.lock().unwrap() >= 2).await;
+        task.abort();
+        assert!(
+            b.received().iter().all(|c| c == "jdev/sys/getPublicKey"),
+            "sent more than getPublicKey to an unknown key: {:?}",
+            b.received()
+        );
+        assert!(!st.sources.loxone.as_ref().unwrap().connected());
+
+        // A configured pin wins over trust on first use.
+        let fresh = tmp_file("pin-fresh");
+        let mut cfg = config(url_b, PASSWORD, fresh.clone());
+        cfg.key_pin = Some(normalize_fingerprint(&public_key_sha256(&a.pem).unwrap()));
+        let before = b.received().len();
+        let task = tokio::spawn(run_loxone_connection(lox_state("lox-pin-c"), cfg));
+        wait_for("an attempt", || b.received().len() > before).await;
+        sleep(Duration::from_millis(200)).await;
+        task.abort();
+        assert!(b.received().iter().all(|c| c == "jdev/sys/getPublicKey"));
+        assert!(!fresh.exists());
+        let _ = std::fs::remove_file(&token_file);
+    }
+
+    #[test]
+    fn fingerprints_normalize() {
+        assert_eq!(normalize_fingerprint("AB:cd:0F"), "abcd0f");
+        assert_eq!(normalize_fingerprint(" abcd "), "abcd");
     }
 
     // rivet: partially-verifies REQ-LOX-002

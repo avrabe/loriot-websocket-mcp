@@ -293,7 +293,12 @@ artifacts:
     fields:
       decision: >
         The client has no API that takes a free-form command string. A test
-        asserts the set of commands it can emit equals the allow-list.
+        asserts the set of commands it can emit equals the allow-list. The
+        Miniserver's public key is pinned (LOXONE_KEY_SHA256, else trusted on
+        first use and remembered in the token file); a different key is
+        refused before anything derived from the credentials is sent, so a
+        host on a plain ws:// path cannot read the session and relay or
+        brute-force the login.
       rationale: >
         Reading needs only the handful of session commands; making anything
         else unrepresentable is cheaper to check than reviewing every call

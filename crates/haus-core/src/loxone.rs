@@ -395,19 +395,7 @@ impl Session {
     /// public key, base64: the argument of `jdev/sys/keyexchange/`.
     pub fn encrypted_key(&self, public_key_pem: &str) -> Result<String, LoxError> {
         use rsa::pkcs8::DecodePublicKey;
-        // The Miniserver labels its SubjectPublicKeyInfo as a certificate and
-        // may send it on one line: take the base64 between the markers.
-        let body: String = public_key_pem
-            .split("-----")
-            .filter(|part| {
-                let p = part.trim();
-                !p.is_empty() && !p.starts_with("BEGIN") && !p.starts_with("END")
-            })
-            .flat_map(|part| part.chars().filter(|c| !c.is_whitespace()))
-            .collect();
-        let der = base64::engine::general_purpose::STANDARD
-            .decode(body)
-            .map_err(|e| proto(format!("public key: {e}")))?;
+        let der = public_key_der(public_key_pem)?;
         let key = rsa::RsaPublicKey::from_public_key_der(&der)
             .map_err(|e| proto(format!("public key: {e}")))?;
         let plain = format!("{}:{}", hex::encode(self.key), hex::encode(self.iv));
@@ -445,6 +433,29 @@ impl Session {
             .map_err(|_| proto("bad padding"))?;
         String::from_utf8(plain).map_err(|_| proto("not utf-8"))
     }
+}
+
+/// The DER of the Miniserver's public key. It labels its
+/// SubjectPublicKeyInfo as a certificate and may send it on one line, so take
+/// the base64 between the markers.
+pub fn public_key_der(public_key_pem: &str) -> Result<Vec<u8>, LoxError> {
+    let body: String = public_key_pem
+        .split("-----")
+        .filter(|part| {
+            let p = part.trim();
+            !p.is_empty() && !p.starts_with("BEGIN") && !p.starts_with("END")
+        })
+        .flat_map(|part| part.chars().filter(|c| !c.is_whitespace()))
+        .collect();
+    base64::engine::general_purpose::STANDARD
+        .decode(body)
+        .map_err(|e| proto(format!("public key: {e}")))
+}
+
+/// The SHA-256 fingerprint (lowercase hex) of the Miniserver's public key:
+/// what `LOXONE_KEY_SHA256` pins and the token file remembers.
+pub fn public_key_sha256(public_key_pem: &str) -> Result<String, LoxError> {
+    Ok(hex::encode(Sha256::digest(public_key_der(public_key_pem)?)))
 }
 
 /// Seconds between 1970-01-01 and 2009-01-01 (Loxone's `validUntil` epoch).
