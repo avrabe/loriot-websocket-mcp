@@ -203,3 +203,25 @@ artifacts:
     links:
       - type: satisfies
         target: REQ-DEPLOY-001
+
+  - id: DD-010
+    type: design-decision
+    title: wmbusmeters decodes the radio, haus consumes its JSON
+    status: draft
+    fields:
+      decision: >
+        A wM-Bus USB receiver (an IMST iU891A/iU893A-class stick, C1+T1)
+        is driven by wmbusmeters, which runs as its own process; haus
+        subscribes to its JSON telegrams. haus does not decode wM-Bus itself.
+      rationale: >
+        wmbusmeters carries maintained drivers for the meters in question
+        (vario451 for Techem Vario 4 heat meters, fhkvdataiii/iv for Techem
+        heat cost allocators) and the receiver support. Keeping it a separate
+        process keeps its GPL-3.0 code out of haus's MIT binary and lets the
+        receiver sit on another host than haus if radio range needs it.
+      alternatives: >
+        Decode wM-Bus in Rust inside haus (re-implements every driver);
+        the Techem tenant portal only (monthly, per apartment, fragile login).
+    links:
+      - type: satisfies
+        target: REQ-WMBUS-001

@@ -331,3 +331,44 @@ artifacts:
     fields:
       priority: could
       category: interface
+
+  # --- Later: wireless M-Bus meters (heat meters, heat cost allocators) ---
+  - id: REQ-WMBUS-001
+    type: requirement
+    title: Wireless M-Bus meters as a source
+    status: draft
+    description: >
+      haus reads wireless M-Bus meters through wmbusmeters' JSON output
+      (stdout or MQTT): heat meters (energy in kWh, current and previous
+      billing period) and heat cost allocators (consumption units, room and
+      radiator temperature where the meter sends them). Series are keyed by
+      manufacturer and meter id. Meter ids and AES keys come only from the
+      deployment's configuration. A telegram that cannot be decoded (no
+      driver, or encrypted without a key) is counted and reported per meter
+      on the health page, never dropped silently.
+    fields:
+      priority: could
+      category: functional
+    links:
+      - type: constraint-satisfies
+        target: SC-004
+      - type: constraint-satisfies
+        target: SC-007
+
+  - id: REQ-TECHEM-001
+    type: requirement
+    title: Monthly consumption from the Techem tenant portal
+    status: draft
+    description: >
+      Optional cross-check for the billing-relevant monthly values (kWh,
+      allocator units, m3) that the Techem tenant portal shows. There is no
+      public API; access would follow the browser login (OAuth2 with PKCE and
+      a refresh token) that community clients use, so it may break whenever
+      the portal changes. Only after REQ-WMBUS-001, and only if the radio path
+      leaves a gap.
+    fields:
+      priority: could
+      category: interface
+    links:
+      - type: traces-to
+        target: REQ-WMBUS-001
