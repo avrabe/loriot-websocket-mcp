@@ -22,6 +22,8 @@ hex = "0.4"
 urlencoding = "2.1"
 # Time-series store (DD-003)
 redb = "4.5"
+# Stats4Lox export files are gzip (REQ-IMPORT-002)
+flate2 = "1"
 
 # Optional dependencies for weather module
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"], optional = true }

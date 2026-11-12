@@ -142,7 +142,7 @@ artifacts:
   - id: DD-006
     type: design-decision
     title: Count checks in the import, as the export did
-    status: approved
+    status: implemented
     description: >
       Every import ends with a per-series count comparison against its source and fails on a difference.
     release: v0.4.0
