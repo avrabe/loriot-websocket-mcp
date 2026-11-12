@@ -569,3 +569,23 @@ artifacts:
     links:
       - type: traces-to
         target: REQ-WARN-001
+
+  - id: REQ-WARN-006
+    type: requirement
+    title: Stuck Loxone sensors
+    status: implemented
+    release: v0.4.0
+    description: >
+      A Loxone temperature or humidity whose value has not changed for the
+      stuck threshold (default 72 h) gets a warning, and its value takes no
+      part in the room's temperature, mould and heating rules. The
+      Miniserver repeats the last value of a sensor that stopped sending (an
+      empty battery), so without this rule an old value looks current and
+      can raise a false warning. The value standing before the evaluation
+      window counts, however old.
+    fields:
+      priority: must
+      category: functional
+    links:
+      - type: traces-to
+        target: REQ-WARN-001
