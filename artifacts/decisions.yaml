@@ -72,7 +72,11 @@ artifacts:
         append-only JSONL read in full for every history query) cannot serve
         range queries on that within 512 MB on a Pi. redb is pure Rust, embedded, one file,
         and is what warte uses for its machine history (REQ-MHIST-001 there).
-        To be confirmed by REQ-RES-001's measurement on the target hardware.
+        Measured 2026-11-12 with crates/haus-core/examples/store_bench.rs on a
+        developer Mac (NOT the target): 7M points written in 6.9 s, 257 MiB
+        file (38.5 bytes/point), 77 MB peak RSS with a 32 MiB page cache, a
+        90-day read of one 5-minute series 1.8 ms. To be confirmed by
+        REQ-RES-001's measurement on the target hardware with the same example.
       alternatives: >
         SQLite (sqlx); keep InfluxDB on another host (the dependency being
         retired); JSONL per month with an index.
@@ -113,7 +117,7 @@ artifacts:
   - id: DD-005
     type: design-decision
     title: Loxone series are identified by UUID
-    status: approved
+    status: implemented
     description: >
       Loxone series are keyed by the control UUID carried in every exported point and live event.
     release: v0.4.0

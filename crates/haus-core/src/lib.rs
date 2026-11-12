@@ -21,6 +21,7 @@ pub mod energy;
 pub mod heatpump;
 pub mod sensors;
 pub mod storage;
+pub mod store;
 pub mod thermal;
 pub mod weather;
 
