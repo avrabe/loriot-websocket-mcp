@@ -1,0 +1,35 @@
+# Adapted from pulseengine/temper templates/workflows/hostname-scan.yml.
+# This repository is public: the job fails when a change adds a private
+# hostname or address (mDNS/LAN names, RFC 1918 / CGNAT / link-local, ULA)
+# or a name from the HOSTNAME_SCAN_DENYLIST secret (never commit real names;
+# SC-008). Per-repo exceptions go in .github/hostname-scan-allow.txt.
+#
+# `hostname-scan` is a required status check: no `paths` filter, ever.
+name: hostname-scan
+
+on:
+  pull_request:
+  merge_group:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hostname-scan-${{ github.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  hostname-scan:
+    name: hostname-scan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: pulseengine/temper/.github/actions/hostname-scan@03a53ca7dc3ac604252abcb70b267cd9f8ef623e # main 2026-11-12
+        with:
+          denylist: ${{ secrets.HOSTNAME_SCAN_DENYLIST }}
