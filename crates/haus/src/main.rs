@@ -4,6 +4,7 @@
 //! and reports each source's connection state on `/health`.
 
 mod api;
+mod compare_cmd;
 mod dashboard;
 mod import_cmd;
 mod loxone;
@@ -26,6 +27,7 @@ use state::{Sources, UpstreamHealth};
 const USAGE: &str = "\
 Usage: haus [--help | --version]
        haus import loriot|stats4lox <path> [options]   (haus import --help)
+       haus compare stats4lox <dir> --since <time>      (haus compare --help)
 
 Keeps home climate readings (LoRaWAN via LORIOT) and serves them over HTTP.
 
@@ -46,6 +48,7 @@ Environment:
 enum Cli {
     Run,
     Import(import_cmd::ImportArgs),
+    Compare(compare_cmd::CompareArgs),
     Exit { code: i32, stdout: String },
 }
 
@@ -67,6 +70,19 @@ fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Cli {
                 stdout: import_cmd::USAGE.to_string(),
             }
         }
+        Some("compare") if matches!(args.get(1).map(String::as_str), Some("-h" | "--help")) => {
+            Cli::Exit {
+                code: 0,
+                stdout: compare_cmd::USAGE.to_string(),
+            }
+        }
+        Some("compare") => match compare_cmd::parse(&args[1..], std::env::var("HAUS_STORE").ok()) {
+            Ok(a) => Cli::Compare(a),
+            Err(e) => Cli::Exit {
+                code: 2,
+                stdout: format!("haus compare: {e}\n\n{}", compare_cmd::USAGE),
+            },
+        },
         Some("import") => match import_cmd::parse(&args[1..], std::env::var("HAUS_STORE").ok()) {
             Ok(a) => Cli::Import(a),
             Err(e) => Cli::Exit {
@@ -144,6 +160,7 @@ fn main() -> anyhow::Result<()> {
     match parse_args(std::env::args().skip(1)) {
         Cli::Run => {}
         Cli::Import(a) => std::process::exit(import_cmd::run(&a)),
+        Cli::Compare(a) => std::process::exit(compare_cmd::run(&a)),
         Cli::Exit { code, stdout } => {
             if code == 0 {
                 println!("{stdout}");

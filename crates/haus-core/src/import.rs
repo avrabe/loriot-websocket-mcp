@@ -80,9 +80,9 @@ impl ImportReport {
 }
 
 /// Points of one series collected from the source, by time.
-struct Pending {
-    meta: SeriesMeta,
-    points: BTreeMap<i64, f64>,
+pub struct ParsedSeries {
+    pub meta: SeriesMeta,
+    pub points: BTreeMap<i64, f64>,
 }
 
 /// Turn a JSON number or bool into a value; `None` for null.
@@ -99,7 +99,7 @@ fn number(v: &Value) -> Result<Option<f64>, String> {
 }
 
 /// Add a point, failing on a second, different value at the same time.
-fn add(p: &mut Pending, ts: i64, value: f64, problems: &mut Vec<String>) {
+fn add(p: &mut ParsedSeries, ts: i64, value: f64, problems: &mut Vec<String>) {
     match p.points.get(&ts) {
         Some(old) if old.to_bits() != value.to_bits() && !(old.is_nan() && value.is_nan()) => {
             problems.push(format!(
@@ -116,7 +116,7 @@ fn add(p: &mut Pending, ts: i64, value: f64, problems: &mut Vec<String>) {
 /// Write every pending series, then read it back and compare.
 fn write_and_check(
     store: &Store,
-    pending: BTreeMap<SeriesKey, Pending>,
+    pending: BTreeMap<SeriesKey, ParsedSeries>,
     report: &mut ImportReport,
 ) -> Result<(), ImportError> {
     const BATCH: usize = 50_000;
@@ -211,7 +211,7 @@ pub fn import_loriot(
 ) -> Result<ImportReport, ImportError> {
     let file = std::fs::File::open(path).map_err(io_err(path))?;
     let mut report = ImportReport::default();
-    let mut pending: BTreeMap<SeriesKey, Pending> = BTreeMap::new();
+    let mut pending: BTreeMap<SeriesKey, ParsedSeries> = BTreeMap::new();
     for (no, line) in std::io::BufReader::new(file).lines().enumerate() {
         let line = line.map_err(io_err(path))?;
         if line.trim().is_empty() {
@@ -241,7 +241,7 @@ pub fn import_loriot(
                 }
             };
             let key = SeriesKey::new(Source::Loriot, eui, field);
-            let p = pending.entry(key.clone()).or_insert_with(|| Pending {
+            let p = pending.entry(key.clone()).or_insert_with(|| ParsedSeries {
                 meta: SeriesMeta {
                     key,
                     quantity,
@@ -289,14 +289,20 @@ pub fn loxone_quantity(category: &str, measurement: &str) -> (Quantity, &'static
     }
 }
 
-/// Import a Stats4Lox export directory (REQ-IMPORT-002): `manifest.json` and
-/// `<measurement dir>/<YYYY-MM>.jsonl.gz`, one InfluxDB point per line with
-/// `time` in ns, the measurement's fields and its tags.
-///
-/// Series are keyed by the point's `uuid` tag and field. `internal_*`
-/// (telegraf's own metrics) and measurements whose points carry no `uuid`
-/// are skipped and named in [`ImportReport::skipped`].
-pub fn import_stats4lox(store: &Store, dir: &Path) -> Result<ImportReport, ImportError> {
+/// Read a Stats4Lox export (`manifest.json` and
+/// `<measurement dir>/<YYYY-MM>.jsonl.gz`), one measurement at a time, so
+/// memory holds one measurement, not the export. For each measurement, after
+/// its points were parsed and its counts compared with the manifest,
+/// `each(name, series, report)` gets its series. Shared by the import and
+/// `compare`, so both read the format the same way.
+pub fn read_stats4lox<F>(
+    dir: &Path,
+    report: &mut ImportReport,
+    mut each: F,
+) -> Result<(), ImportError>
+where
+    F: FnMut(&str, BTreeMap<SeriesKey, ParsedSeries>, &mut ImportReport) -> Result<(), ImportError>,
+{
     let manifest_path = dir.join("manifest.json");
     let fmt = |msg: String| ImportError::Format {
         path: manifest_path.display().to_string(),
@@ -313,7 +319,6 @@ pub fn import_stats4lox(store: &Store, dir: &Path) -> Result<ImportReport, Impor
         return Err(fmt("`measurements` is empty".into()));
     }
 
-    let mut report = ImportReport::default();
     for (name, m) in measurements {
         if name.starts_with("internal_") {
             report
@@ -353,7 +358,7 @@ pub fn import_stats4lox(store: &Store, dir: &Path) -> Result<ImportReport, Impor
             .collect();
         files.sort();
 
-        let mut pending: BTreeMap<SeriesKey, Pending> = BTreeMap::new();
+        let mut pending: BTreeMap<SeriesKey, ParsedSeries> = BTreeMap::new();
         let (mut with_uuid, mut without_uuid) = (0u64, 0u64);
         for file in &files {
             let gz = flate2::read::GzDecoder::new(std::fs::File::open(file).map_err(io_err(file))?);
@@ -409,7 +414,7 @@ pub fn import_stats4lox(store: &Store, dir: &Path) -> Result<ImportReport, Impor
                         }
                     };
                     let key = SeriesKey::new(Source::Loxone, uuid, field.clone());
-                    let pe = pending.entry(key.clone()).or_insert_with(|| Pending {
+                    let pe = pending.entry(key.clone()).or_insert_with(|| ParsedSeries {
                         meta: SeriesMeta {
                             key,
                             quantity,
@@ -461,8 +466,23 @@ pub fn import_stats4lox(store: &Store, dir: &Path) -> Result<ImportReport, Impor
                 .problems
                 .push(format!("{name}: no `influx_counts` in the manifest"));
         }
-        write_and_check(store, pending, &mut report)?;
+        each(name, pending, report)?;
     }
+    Ok(())
+}
+
+/// Import a Stats4Lox export directory (REQ-IMPORT-002): `manifest.json` and
+/// `<measurement dir>/<YYYY-MM>.jsonl.gz`, one InfluxDB point per line with
+/// `time` in ns, the measurement's fields and its tags.
+///
+/// Series are keyed by the point's `uuid` tag and field. `internal_*`
+/// (telegraf's own metrics) and measurements whose points carry no `uuid`
+/// are skipped and named in [`ImportReport::skipped`].
+pub fn import_stats4lox(store: &Store, dir: &Path) -> Result<ImportReport, ImportError> {
+    let mut report = ImportReport::default();
+    read_stats4lox(dir, &mut report, |_, pending, report| {
+        write_and_check(store, pending, report)
+    })?;
     if report.series.is_empty() && report.problems.is_empty() {
         report
             .problems

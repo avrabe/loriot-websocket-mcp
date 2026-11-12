@@ -287,7 +287,7 @@ artifacts:
   - id: REQ-RETIRE-001
     type: requirement
     title: Compare haus against a Stats4Lox logger it replaces
-    status: approved
+    status: verified
     release: v0.4.0
     description: >
       `haus compare stats4lox <dir>` reports, per series, whether haus's value
