@@ -142,13 +142,17 @@ artifacts:
   - id: REQ-LOX-001
     type: requirement
     title: Live Loxone values from the Miniserver websocket
-    status: approved
+    status: implemented
     release: v0.4.0
     description: >
       haus connects to the Miniserver's websocket with token authentication,
       enables binary status updates, and stores value events for the state
       UUIDs of the configured sensors (at least every series Stats4Lox
       recorded). Events for UUIDs not configured are ignored.
+      Verified here against an in-process fake Miniserver implementing the
+      V17.0 protocol; that every real series maps to a state is checked on
+      the deployment against the real Miniserver (startup log line
+      "N of M series mapped", /health), so this stays implemented until then.
     fields:
       priority: must
       category: functional
@@ -161,7 +165,7 @@ artifacts:
   - id: REQ-LOX-002
     type: requirement
     title: The Miniserver connection is read-only and its credentials secret
-    status: approved
+    status: verified
     release: v0.4.0
     description: >
       Credentials come only from the service's environment file. They never
@@ -178,7 +182,7 @@ artifacts:
   - id: REQ-LOX-003
     type: requirement
     title: The Miniserver connection recovers and reports its state
-    status: approved
+    status: verified
     release: v0.4.0
     description: >
       Keep-alive, silent-connection detection, token refresh and reconnect with

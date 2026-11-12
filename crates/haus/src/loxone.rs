@@ -1,0 +1,961 @@
+//! The Loxone Miniserver source (REQ-LOX-001..003, DD-004, DD-012): a
+//! read-only websocket client that stores value events for the series haus
+//! knows, keyed by the same control UUID the Stats4Lox import used.
+//!
+//! Per connection: key exchange (RSA + AES session), token authentication
+//! (a stored token, else a new one from the user's password), structure file,
+//! state resolution, `enablebinstatusupdate`, then events until the
+//! connection drops. Keepalive every 60 s; no frame for 150 s counts as dead;
+//! reconnect with exponential backoff. Token commands always go encrypted.
+//! Credentials, tokens and hashes are never logged.
+
+use crate::state::{run_blocking, AppState};
+use futures::{SinkExt, StreamExt};
+use haus_core::ingest::Item;
+use haus_core::loxone::{
+    hmac_hex, parse_value_events, password_hash, resolve_states, Cmd, HashAlg, Header, LoxUuid,
+    MsgKind, Response, Secret, Session, LOXONE_EPOCH_UNIX_S,
+};
+use haus_core::store::{SeriesMeta, Source};
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::time::Duration;
+use tokio::net::TcpStream;
+use tokio::time::{sleep, timeout};
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
+
+type Ws = WebSocketStream<MaybeTlsStream<TcpStream>>;
+type BoxError = Box<dyn std::error::Error + Send + Sync>;
+
+/// Token permission: "App", a long-lived token (V17.0, Permissions).
+const PERMISSION_APP: u32 = 4;
+/// Refresh the token when it has less than this left.
+const REFRESH_BEFORE_S: i64 = 24 * 3600;
+
+/// How to reach and log in to the Miniserver. No `Debug`: it holds the
+/// password.
+pub struct LoxoneConfig {
+    /// `ws://host[:port]` or `wss://host[:port]`; `/ws/rfc6455` is appended.
+    pub url: String,
+    pub user: String,
+    pub password: Secret,
+    /// Where the token is kept between connections (mode 0600).
+    pub token_file: PathBuf,
+    /// Optional `{"uuid/field": "stateName or state uuid"}` overrides.
+    pub overrides: HashMap<String, String>,
+    pub keepalive: Duration,
+    pub silence: Duration,
+    pub request_timeout: Duration,
+    pub backoff_base: Duration,
+    pub backoff_max: Duration,
+}
+
+impl LoxoneConfig {
+    /// From `LOXONE_URL`, `LOXONE_USER`, `LOXONE_PASSWORD`, `LOXONE_TOKEN_FILE`
+    /// (default `loxone-token.json`) and `LOXONE_MAP`. `Ok(None)` when
+    /// `LOXONE_URL` is unset: the source is off.
+    pub fn from_env() -> Result<Option<Self>, String> {
+        let var = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
+        let Some(url) = var("LOXONE_URL") else {
+            return Ok(None);
+        };
+        let user = var("LOXONE_USER").ok_or("LOXONE_URL is set but LOXONE_USER is not")?;
+        let password =
+            var("LOXONE_PASSWORD").ok_or("LOXONE_URL is set but LOXONE_PASSWORD is not")?;
+        let overrides = match var("LOXONE_MAP") {
+            Some(p) => serde_json::from_str(
+                &std::fs::read_to_string(&p).map_err(|e| format!("LOXONE_MAP {p}: {e}"))?,
+            )
+            .map_err(|e| format!("LOXONE_MAP {p}: {e}"))?,
+            None => HashMap::new(),
+        };
+        Ok(Some(Self {
+            url,
+            user,
+            password: Secret::new(password),
+            token_file: var("LOXONE_TOKEN_FILE")
+                .unwrap_or_else(|| "loxone-token.json".into())
+                .into(),
+            overrides,
+            ..Self::defaults()
+        }))
+    }
+
+    fn defaults() -> Self {
+        Self {
+            url: String::new(),
+            user: String::new(),
+            password: Secret::new(""),
+            token_file: PathBuf::new(),
+            overrides: HashMap::new(),
+            keepalive: Duration::from_secs(60),
+            silence: Duration::from_secs(150),
+            request_timeout: Duration::from_secs(20),
+            backoff_base: Duration::from_secs(1),
+            backoff_max: Duration::from_secs(300),
+        }
+    }
+}
+
+/// The token kept between connections.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct StoredToken {
+    user: String,
+    token: String,
+    /// Seconds since 2009-01-01 (Loxone epoch).
+    valid_until: i64,
+    /// Identifies haus to the Miniserver across token requests.
+    client_uuid: String,
+}
+
+fn now_loxone_s() -> i64 {
+    chrono::Utc::now().timestamp() - LOXONE_EPOCH_UNIX_S
+}
+
+fn load_token(cfg: &LoxoneConfig) -> Option<StoredToken> {
+    let t: StoredToken =
+        serde_json::from_str(&std::fs::read_to_string(&cfg.token_file).ok()?).ok()?;
+    (t.user == cfg.user).then_some(t)
+}
+
+fn save_token(cfg: &LoxoneConfig, t: &StoredToken) -> std::io::Result<()> {
+    use std::io::Write;
+    #[cfg(unix)]
+    use std::os::unix::fs::OpenOptionsExt;
+    let tmp = cfg.token_file.with_extension("tmp");
+    let mut o = std::fs::OpenOptions::new();
+    o.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    o.mode(0o600);
+    let mut f = o.open(&tmp)?;
+    f.write_all(serde_json::to_string(t).expect("serialises").as_bytes())?;
+    f.sync_all()?;
+    std::fs::rename(&tmp, &cfg.token_file)
+}
+
+/// A client UUID in Loxone's form, random.
+fn new_client_uuid() -> String {
+    let b: [u8; 16] = std::array::from_fn(|_| fastrand::u8(..));
+    LoxUuid(b).to_string()
+}
+
+/// Run the source forever: connect, read events, reconnect with backoff.
+pub async fn run_loxone_connection(state: AppState, cfg: LoxoneConfig) {
+    let health = state
+        .sources
+        .loxone
+        .as_ref()
+        .expect("loxone source enabled in Sources");
+    let mut attempt: u32 = 0;
+    loop {
+        attempt = attempt.saturating_add(1);
+        match session(&state, &cfg).await {
+            Ok(()) => {
+                tracing::info!("Loxone connection closed");
+                attempt = 0;
+            }
+            Err(e) => tracing::warn!("Loxone connection failed: {e}"),
+        }
+        health.set_connected(false);
+        let exp = attempt.saturating_sub(1).min(16);
+        let delay = cfg
+            .backoff_base
+            .saturating_mul(1u32 << exp)
+            .min(cfg.backoff_max);
+        let jitter = Duration::from_millis(fastrand::u64(0..=(delay.as_millis() as u64 / 4)));
+        sleep(delay + jitter).await;
+    }
+}
+
+/// One connection: framing per V17.0 "Understanding the messages".
+struct Conn<'a> {
+    ws: Ws,
+    cfg: &'a LoxoneConfig,
+    state: &'a AppState,
+    /// A header whose payload has not arrived yet. Kept here, not in the
+    /// `next` future, so cancelling `next` (in `select!`) loses nothing.
+    pending: Option<Header>,
+    /// When the last frame arrived: the silence deadline counts from here,
+    /// whatever else the loop does in between.
+    last_rx: tokio::time::Instant,
+}
+
+/// A complete message: its header and the payload that followed it.
+enum Msg {
+    Text(String),
+    Binary(MsgKind, Vec<u8>),
+    Keepalive,
+}
+
+impl Conn<'_> {
+    async fn send(&mut self, cmd: &Cmd, session: Option<&Session>) -> Result<(), BoxError> {
+        let text = match session {
+            Some(s) if cmd.must_encrypt() => s.encrypt(cmd),
+            _ if cmd.must_encrypt() => return Err("token command without a session".into()),
+            _ => cmd.text(),
+        };
+        tracing::debug!("loxone -> {}", cmd.name());
+        timeout(self.cfg.request_timeout, self.ws.send(Message::text(text)))
+            .await
+            .map_err(|_| "send timed out")??;
+        Ok(())
+    }
+
+    /// The next complete message, or an error after `wait` without a frame.
+    /// Cancel-safe: a frame is either fully handled or not taken.
+    async fn next(&mut self, wait: Duration) -> Result<Msg, BoxError> {
+        loop {
+            let frame = timeout(wait, self.ws.next())
+                .await
+                .map_err(|_| format!("no frame from the Miniserver for {wait:?}"))?
+                .ok_or("connection closed")??;
+            self.last_rx = tokio::time::Instant::now();
+            if let Some(h) = self.state.sources.loxone.as_ref() {
+                h.record_message();
+            }
+            match (frame, self.pending.take()) {
+                (Message::Binary(b), None) => {
+                    let h = Header::parse(&b)?;
+                    match h.kind {
+                        MsgKind::Keepalive => return Ok(Msg::Keepalive),
+                        MsgKind::OutOfService => return Err("Miniserver out of service".into()),
+                        // An estimated header is always followed by an exact one.
+                        _ if h.estimated => {}
+                        _ => self.pending = Some(h),
+                    }
+                }
+                (Message::Binary(b), Some(h)) => return Ok(Msg::Binary(h.kind, b.to_vec())),
+                (Message::Text(t), _) => return Ok(Msg::Text(t.as_str().to_string())),
+                (Message::Close(_), _) => return Err("connection closed by the Miniserver".into()),
+                (_, pending) => self.pending = pending,
+            }
+        }
+    }
+
+    /// Send `cmd` and return the next text message (before status updates
+    /// are enabled, nothing else arrives in between).
+    async fn request_text(
+        &mut self,
+        cmd: &Cmd,
+        session: Option<&Session>,
+    ) -> Result<String, BoxError> {
+        self.send(cmd, session).await?;
+        loop {
+            match self.next(self.cfg.request_timeout).await? {
+                Msg::Text(t) => return Ok(t),
+                Msg::Keepalive | Msg::Binary(..) => {}
+            }
+        }
+    }
+
+    async fn request(
+        &mut self,
+        cmd: &Cmd,
+        session: Option<&Session>,
+    ) -> Result<Response, BoxError> {
+        let r = Response::parse(&self.request_text(cmd, session).await?)?;
+        if r.code != 200 {
+            return Err(format!("{} answered {}", cmd.name(), r.code).into());
+        }
+        Ok(r)
+    }
+
+    /// key, salt and hashAlg for the user.
+    async fn getkey2(&mut self) -> Result<(String, String, HashAlg), BoxError> {
+        let r = self
+            .request(
+                &Cmd::GetKey2 {
+                    user: self.cfg.user.clone(),
+                },
+                None,
+            )
+            .await?;
+        let v = &r.value;
+        let field = |k: &str| {
+            v[k].as_str()
+                .map(str::to_string)
+                .ok_or(format!("getkey2: no {k}"))
+        };
+        Ok((
+            field("key")?,
+            field("salt")?,
+            HashAlg::parse(&field("hashAlg")?)?,
+        ))
+    }
+
+    /// Authenticate the socket: the stored token if it works, else a new one.
+    async fn authenticate(&mut self, session: &Session) -> Result<StoredToken, BoxError> {
+        if let Some(t) = load_token(self.cfg).filter(|t| t.valid_until > now_loxone_s() + 3600) {
+            let (key, _, alg) = self.getkey2().await?;
+            let hash = Secret::new(hmac_hex(alg, &key, &t.token)?);
+            let cmd = Cmd::AuthWithToken {
+                hash,
+                user: self.cfg.user.clone(),
+            };
+            match self.request(&cmd, Some(session)).await {
+                Ok(_) => {
+                    tracing::info!("Loxone: authenticated with the stored token");
+                    return Ok(t);
+                }
+                Err(e) => {
+                    tracing::warn!("Loxone: stored token rejected ({e}); requesting a new one")
+                }
+            }
+        }
+        let (key, salt, alg) = self.getkey2().await?;
+        let pw = password_hash(alg, self.cfg.password.expose(), &salt);
+        let hash = Secret::new(hmac_hex(alg, &key, &format!("{}:{pw}", self.cfg.user))?);
+        let client_uuid = load_token(self.cfg)
+            .map(|t| t.client_uuid)
+            .unwrap_or_else(new_client_uuid);
+        let r = self
+            .request(
+                &Cmd::GetJwt {
+                    hash,
+                    user: self.cfg.user.clone(),
+                    permission: PERMISSION_APP,
+                    client_uuid: client_uuid.clone(),
+                    info: "haus".into(),
+                },
+                Some(session),
+            )
+            .await?;
+        let t = StoredToken {
+            user: self.cfg.user.clone(),
+            token: r.value["token"]
+                .as_str()
+                .ok_or("getjwt: no token")?
+                .to_string(),
+            valid_until: r.value["validUntil"]
+                .as_i64()
+                .ok_or("getjwt: no validUntil")?,
+            client_uuid,
+        };
+        save_token(self.cfg, &t)?;
+        tracing::info!("Loxone: new token acquired");
+        Ok(t)
+    }
+
+    async fn refresh(&mut self, session: &Session, t: &mut StoredToken) -> Result<(), BoxError> {
+        let (key, _, alg) = self.getkey2().await?;
+        let hash = Secret::new(hmac_hex(alg, &key, &t.token)?);
+        let r = self
+            .request(
+                &Cmd::RefreshJwt {
+                    hash,
+                    user: self.cfg.user.clone(),
+                },
+                Some(session),
+            )
+            .await?;
+        if let Some(tok) = r.value["token"].as_str() {
+            t.token = tok.to_string();
+        }
+        t.valid_until = r.value["validUntil"]
+            .as_i64()
+            .ok_or("refreshjwt: no validUntil")?;
+        save_token(self.cfg, t)?;
+        tracing::info!("Loxone: token refreshed");
+        Ok(())
+    }
+}
+
+/// The Loxone series the store knows: `(control uuid, field)` → metadata.
+fn wanted_series(state: &AppState) -> Result<HashMap<(String, String), SeriesMeta>, BoxError> {
+    Ok(state
+        .ingest
+        .store()
+        .series()?
+        .into_iter()
+        .filter(|(_, m)| m.key.source == Source::Loxone)
+        .map(|(_, m)| ((m.key.source_id.clone(), m.key.field.clone()), m))
+        .collect())
+}
+
+async fn session(state: &AppState, cfg: &LoxoneConfig) -> Result<(), BoxError> {
+    let url = format!("{}/ws/rfc6455", cfg.url.trim_end_matches('/'));
+    let mut req = url.as_str().into_client_request()?;
+    req.headers_mut()
+        .insert("Sec-WebSocket-Protocol", "remotecontrol".parse()?);
+    let (ws, _) = timeout(cfg.request_timeout, connect_async(req))
+        .await
+        .map_err(|_| "connect timed out")??;
+    let mut c = Conn {
+        ws,
+        cfg,
+        state,
+        pending: None,
+        last_rx: tokio::time::Instant::now(),
+    };
+
+    // Key exchange, then authentication.
+    let pem = c.request(&Cmd::GetPublicKey, None).await?;
+    let pem = pem
+        .value
+        .as_str()
+        .ok_or("getPublicKey: no key")?
+        .to_string();
+    let sess = Session::random();
+    c.request(&Cmd::KeyExchange(sess.encrypted_key(&pem)?), None)
+        .await?;
+    let mut token = c.authenticate(&sess).await?;
+    if token.valid_until - now_loxone_s() < REFRESH_BEFORE_S {
+        c.refresh(&sess, &mut token).await?;
+    }
+
+    // Which state UUIDs feed which series.
+    let structure: serde_json::Value =
+        serde_json::from_str(&c.request_text(&Cmd::StructureFile, None).await?)?;
+    let wanted_meta = {
+        let s = state.clone();
+        run_blocking(move || wanted_series(&s).map_err(|e| e.to_string())).await?
+    };
+    let wanted: Vec<(String, String)> = wanted_meta.keys().cloned().collect();
+    let res = resolve_states(&structure, &wanted, &cfg.overrides);
+    tracing::info!(
+        "Loxone: {} of {} series mapped to states",
+        res.states.len(),
+        wanted.len()
+    );
+    for u in &res.unresolved {
+        tracing::warn!("Loxone: unmapped series {u}");
+    }
+
+    c.request(&Cmd::EnableStatusUpdates, None).await?;
+    if let Some(h) = state.sources.loxone.as_ref() {
+        h.set_connected(true);
+    }
+
+    let mut keepalive = tokio::time::interval(cfg.keepalive);
+    keepalive.tick().await;
+    let mut refresh_check = tokio::time::interval(Duration::from_secs(3600));
+    refresh_check.tick().await;
+    loop {
+        let silent_at = c.last_rx + cfg.silence;
+        tokio::select! {
+            _ = tokio::time::sleep_until(silent_at) => {
+                return Err(format!("no frame from the Miniserver for {:?}", cfg.silence).into());
+            }
+            msg = c.next(cfg.silence) => match msg? {
+                Msg::Binary(MsgKind::ValueEvents, b) => {
+                    let ts_ms = chrono::Utc::now().timestamp_millis();
+                    let items: Vec<Item> = parse_value_events(&b)?
+                        .into_iter()
+                        .filter_map(|(u, value)| {
+                            let key = res.states.get(&u)?;
+                            Some(Item { meta: wanted_meta.get(key)?.clone(), ts_ms, value })
+                        })
+                        .collect();
+                    if !items.is_empty() {
+                        let ingest = state.ingest.clone();
+                        run_blocking(move || ingest.ingest(&items)).await?;
+                    }
+                }
+                Msg::Text(t) => {
+                    if let Ok(r) = Response::parse(&t) {
+                        if r.code != 200 {
+                            tracing::warn!("Loxone: {} answered {}", r.control.split('/').take(3).collect::<Vec<_>>().join("/"), r.code);
+                        }
+                    }
+                }
+                Msg::Keepalive | Msg::Binary(..) => {}
+            },
+            _ = keepalive.tick() => c.send(&Cmd::Keepalive, None).await?,
+            _ = refresh_check.tick() => {
+                // Refreshing needs request/response, which would interleave
+                // with events; reconnect instead, the setup refreshes it.
+                if token.valid_until - now_loxone_s() < REFRESH_BEFORE_S {
+                    tracing::info!("Loxone: token expires soon; reconnecting to refresh it");
+                    return Ok(());
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! The client against an in-process fake Miniserver that implements the
+    //! server side of the V17.0 protocol: RSA key exchange, AES `enc`
+    //! commands, getkey2/getjwt/authwithtoken hashing, structure file, value
+    //! event tables, keepalive.
+    use super::*;
+    use crate::state::{tests::test_state, Sources, UpstreamHealth};
+    use base64::Engine as _;
+    use haus_core::loxone::{encode_value_events, ALLOWED_COMMANDS};
+    use haus_core::store::{Quantity, SeriesKey};
+    use haus_core::AppConfig;
+    use rsa::pkcs8::EncodePublicKey;
+    use serde_json::json;
+    use std::sync::{Arc, Mutex};
+    use tokio::net::TcpListener;
+    use tokio_tungstenite::tungstenite::handshake::server::{Request, Response as WsResponse};
+
+    const USER: &str = "haus";
+    const PASSWORD: &str = "correct horse battery staple";
+    const KEY_HEX: &str = "4b6579"; // getkey2 key ("Key")
+    const SALT: &str = "5a17";
+    const CTRL: &str = "13f00a65-01a9-8a08-ffff196db5c1dff3";
+    const CTRL_STATE: &str = "13f00a65-01a9-8a08-ffff196db5c1dff4";
+    const ROOM: &str = "1d000000-0000-0001-ffff000000000001";
+    const ROOM_TARGET: &str = "1d000000-0000-0001-ffff000000000003";
+    const UNKNOWN: &str = "0e000000-0000-0000-0000000000000099";
+
+    #[derive(Clone, Copy, PartialEq)]
+    enum After {
+        /// Keep answering keepalives.
+        Stay,
+        /// Close the connection after the events.
+        Drop,
+        /// Stop answering anything (a wedged peer).
+        Silent,
+    }
+
+    struct Fake {
+        rsa: rsa::RsaPrivateKey,
+        pem: String,
+        token: Mutex<String>,
+        after: After,
+        /// Every command received, decrypted, with "enc:" for encrypted ones.
+        received: Mutex<Vec<String>>,
+        accepts: Mutex<usize>,
+    }
+
+    impl Fake {
+        async fn new(after: After) -> Arc<Self> {
+            let rsa = tokio::task::spawn_blocking(|| {
+                rsa::RsaPrivateKey::new(&mut rand::thread_rng(), 1024).unwrap()
+            })
+            .await
+            .unwrap();
+            // The Miniserver labels its public key as a certificate, one line.
+            let pem = rsa
+                .to_public_key()
+                .to_public_key_pem(rsa::pkcs8::LineEnding::LF)
+                .unwrap()
+                .replace("-----BEGIN PUBLIC KEY-----", "-----BEGIN CERTIFICATE-----")
+                .replace("-----END PUBLIC KEY-----", "-----END CERTIFICATE-----")
+                .replace('\n', "");
+            Arc::new(Self {
+                rsa,
+                pem,
+                token: Mutex::new("tok-1".into()),
+                after,
+                received: Mutex::new(Vec::new()),
+                accepts: Mutex::new(0),
+            })
+        }
+
+        fn received(&self) -> Vec<String> {
+            self.received.lock().unwrap().clone()
+        }
+    }
+
+    fn structure() -> serde_json::Value {
+        json!({"lastModified": "2026-11-12 10:00:00", "controls": {
+            CTRL: {"type": "InfoOnlyAnalog", "uuidAction": CTRL, "states": {"value": CTRL_STATE}},
+            ROOM: {"type": "IRoomControllerV2", "uuidAction": ROOM,
+                   "states": {"tempActual": "1d000000-0000-0001-ffff000000000002",
+                              "tempTarget": ROOM_TARGET}}
+        }})
+    }
+
+    type ServerWs = WebSocketStream<TcpStream>;
+
+    async fn send_text(ws: &mut ServerWs, text: String) {
+        ws.send(Message::Binary(
+            Header::encode(0, text.len() as u32).to_vec().into(),
+        ))
+        .await
+        .unwrap();
+        ws.send(Message::text(text)).await.unwrap();
+    }
+
+    async fn reply(ws: &mut ServerWs, control: &str, code: u16, value: serde_json::Value) {
+        let body = json!({"LL": {"control": control, "value": value, "Code": code.to_string()}});
+        send_text(ws, body.to_string()).await;
+    }
+
+    async fn serve(fake: Arc<Fake>) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            loop {
+                let (tcp, _) = listener.accept().await.unwrap();
+                *fake.accepts.lock().unwrap() += 1;
+                let fake = fake.clone();
+                tokio::spawn(async move {
+                    // The Err type is fixed by tungstenite's callback signature.
+                    #[allow(clippy::result_large_err)]
+                    let cb = |req: &Request, mut resp: WsResponse| {
+                        assert_eq!(req.uri().path(), "/ws/rfc6455");
+                        assert_eq!(
+                            req.headers().get("Sec-WebSocket-Protocol").unwrap(),
+                            "remotecontrol"
+                        );
+                        resp.headers_mut()
+                            .insert("Sec-WebSocket-Protocol", "remotecontrol".parse().unwrap());
+                        Ok(resp)
+                    };
+                    let Ok(mut ws) = tokio_tungstenite::accept_hdr_async(tcp, cb).await else {
+                        return;
+                    };
+                    connection(&fake, &mut ws).await;
+                });
+            }
+        });
+        format!("ws://{addr}")
+    }
+
+    async fn connection(fake: &Fake, ws: &mut ServerWs) {
+        let mut session: Option<([u8; 32], [u8; 16])> = None;
+        let mut silent = false;
+        while let Some(Ok(msg)) = ws.next().await {
+            let Message::Text(t) = msg else { continue };
+            let raw = t.as_str().to_string();
+            let (cmd, encrypted) = if raw.starts_with("jdev/sys/enc/") {
+                let (k, iv) = session.expect("enc before keyexchange");
+                let plain = Session::decrypt_with(&k, &iv, &raw).unwrap();
+                let rest = plain.strip_prefix("salt/").unwrap();
+                (rest.split_once('/').unwrap().1.to_string(), true)
+            } else {
+                (raw.clone(), false)
+            };
+            fake.received
+                .lock()
+                .unwrap()
+                .push(format!("{}{cmd}", if encrypted { "enc:" } else { "" }));
+            if silent {
+                continue;
+            }
+            // The base64 key may contain '/': the argument is the whole rest.
+            let parts: Vec<&str> = match cmd.strip_prefix("jdev/sys/keyexchange/") {
+                Some(rest) => vec!["jdev", "sys", "keyexchange", rest],
+                None => cmd.split('/').collect(),
+            };
+            let expect_hash = |msg: &str| hmac_hex(HashAlg::Sha256, KEY_HEX, msg).unwrap();
+            match parts.as_slice() {
+                ["jdev", "sys", "getPublicKey"] => reply(ws, &cmd, 200, json!(fake.pem)).await,
+                ["jdev", "sys", "keyexchange", b64] => {
+                    let c = base64::engine::general_purpose::STANDARD
+                        .decode(b64)
+                        .unwrap();
+                    let plain = fake.rsa.decrypt(rsa::Pkcs1v15Encrypt, &c).unwrap();
+                    let plain = String::from_utf8(plain).unwrap();
+                    let (k, iv) = plain.split_once(':').unwrap();
+                    session = Some((
+                        hex::decode(k).unwrap().try_into().unwrap(),
+                        hex::decode(iv).unwrap().try_into().unwrap(),
+                    ));
+                    reply(ws, "jdev/sys/keyexchange", 200, json!("")).await
+                }
+                ["jdev", "sys", "getkey2", user] if *user == USER => {
+                    reply(
+                        ws,
+                        &cmd,
+                        200,
+                        json!({"key": KEY_HEX, "salt": SALT, "hashAlg": "SHA256"}),
+                    )
+                    .await
+                }
+                ["jdev", "sys", "getjwt", hash, user, "4", _uuid, "haus"] if encrypted => {
+                    let pw = password_hash(HashAlg::Sha256, PASSWORD, SALT);
+                    if *user == USER && *hash == expect_hash(&format!("{USER}:{pw}")) {
+                        let tok = fake.token.lock().unwrap().clone();
+                        reply(
+                            ws,
+                            "getjwt",
+                            200,
+                            json!({"token": tok,
+                            "validUntil": now_loxone_s() + 30 * 86_400, "tokenRights": 4}),
+                        )
+                        .await
+                    } else {
+                        reply(ws, "getjwt", 401, json!("")).await
+                    }
+                }
+                ["authwithtoken", hash, user] if encrypted => {
+                    let tok = fake.token.lock().unwrap().clone();
+                    let ok = *user == USER && *hash == expect_hash(&tok);
+                    reply(ws, "authwithtoken", if ok { 200 } else { 401 }, json!("")).await
+                }
+                ["data", "LoxAPP3.json"] => send_text(ws, structure().to_string()).await,
+                ["jdev", "sps", "enablebinstatusupdate"] => {
+                    reply(ws, &cmd, 200, json!("1")).await;
+                    let ev = encode_value_events(&[
+                        (LoxUuid::parse(CTRL_STATE).unwrap(), 21.5),
+                        (LoxUuid::parse(ROOM_TARGET).unwrap(), 19.0),
+                        (LoxUuid::parse(UNKNOWN).unwrap(), 5.0),
+                    ]);
+                    ws.send(Message::Binary(
+                        Header::encode(2, ev.len() as u32).to_vec().into(),
+                    ))
+                    .await
+                    .unwrap();
+                    ws.send(Message::Binary(ev.into())).await.unwrap();
+                    match fake.after {
+                        After::Drop => return,
+                        After::Silent => silent = true,
+                        After::Stay => {}
+                    }
+                }
+                ["keepalive"] => {
+                    ws.send(Message::Binary(Header::encode(6, 0).to_vec().into()))
+                        .await
+                        .unwrap();
+                }
+                _ => reply(ws, &cmd, 400, json!("")).await,
+            }
+        }
+    }
+
+    /// A state with the Loxone source on and two imported Loxone series.
+    fn lox_state(name: &str) -> AppState {
+        let mut st = test_state(name, AppConfig::default());
+        st.sources = Arc::new(Sources {
+            loriot: UpstreamHealth::default(),
+            loxone: Some(UpstreamHealth::default()),
+        });
+        let store = st.ingest.store();
+        for (id, field, q) in [
+            (CTRL, "Default", Quantity::Temperature),
+            (ROOM, "HCm", Quantity::Heating),
+        ] {
+            store
+                .ensure_series(&SeriesMeta {
+                    key: SeriesKey::new(Source::Loxone, id, field),
+                    quantity: q,
+                    unit: String::new(),
+                    name: format!("{id} {field}"),
+                    room: None,
+                })
+                .unwrap();
+        }
+        st
+    }
+
+    fn config(url: String, password: &str, token_file: PathBuf) -> LoxoneConfig {
+        LoxoneConfig {
+            url,
+            user: USER.into(),
+            password: Secret::new(password),
+            token_file,
+            overrides: HashMap::from([(format!("{ROOM}/HCm"), "tempTarget".to_string())]),
+            keepalive: Duration::from_millis(100),
+            silence: Duration::from_millis(400),
+            request_timeout: Duration::from_secs(5),
+            backoff_base: Duration::from_millis(50),
+            backoff_max: Duration::from_millis(200),
+        }
+    }
+
+    fn tmp_file(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "haus-lox-{name}-{}-{}.json",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ))
+    }
+
+    fn points(st: &AppState, id: &str, field: &str) -> Vec<f64> {
+        let store = st.ingest.store();
+        let sid = store
+            .series_id(&SeriesKey::new(Source::Loxone, id, field))
+            .unwrap()
+            .unwrap();
+        store
+            .range(sid, i64::MIN, i64::MAX)
+            .unwrap()
+            .into_iter()
+            .map(|(_, v)| v)
+            .collect()
+    }
+
+    async fn wait_for(what: &str, mut f: impl FnMut() -> bool) {
+        let t0 = std::time::Instant::now();
+        while !f() {
+            assert!(
+                t0.elapsed() < Duration::from_secs(15),
+                "timed out waiting for {what}"
+            );
+            sleep(Duration::from_millis(20)).await;
+        }
+    }
+
+    /// Collects formatted log output.
+    #[derive(Clone, Default)]
+    struct LogBuf(Arc<Mutex<Vec<u8>>>);
+    impl std::io::Write for LogBuf {
+        fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(b);
+            Ok(b.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for LogBuf {
+        type Writer = LogBuf;
+        fn make_writer(&'a self) -> Self::Writer {
+            self.clone()
+        }
+    }
+
+    /// Every log line of this test binary, from a process-wide subscriber.
+    /// A thread-local one races with parallel tests: their threads cache
+    /// callsites as disabled and the capture comes back empty.
+    fn global_logs() -> LogBuf {
+        static LOGS: std::sync::OnceLock<LogBuf> = std::sync::OnceLock::new();
+        LOGS.get_or_init(|| {
+            let buf = LogBuf::default();
+            let _ = tracing::subscriber::set_global_default(
+                tracing_subscriber::fmt()
+                    .with_writer(buf.clone())
+                    .with_ansi(false)
+                    .with_max_level(tracing::Level::TRACE)
+                    .finish(),
+            );
+            buf
+        })
+        .clone()
+    }
+
+    // rivet: verifies REQ-LOX-001
+    // rivet: verifies REQ-LOX-002
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_session_stores_events_of_known_series_only() {
+        let logs = global_logs();
+        let fake = Fake::new(After::Stay).await;
+        let url = serve(fake.clone()).await;
+        let st = lox_state("lox-session");
+        let token_file = tmp_file("session");
+        let task = tokio::spawn(run_loxone_connection(
+            st.clone(),
+            config(url, PASSWORD, token_file.clone()),
+        ));
+
+        wait_for("both series", || {
+            points(&st, CTRL, "Default") == vec![21.5] && points(&st, ROOM, "HCm") == vec![19.0]
+        })
+        .await;
+        assert!(st.sources.loxone.as_ref().unwrap().connected());
+        // The unknown state created no series.
+        assert_eq!(st.ingest.store().series().unwrap().len(), 2);
+        // Keepalives flow.
+        wait_for("a keepalive", || {
+            fake.received().iter().any(|c| c == "keepalive")
+        })
+        .await;
+        task.abort();
+
+        let received = fake.received();
+        // Only allow-listed commands; token commands only encrypted.
+        for c in &received {
+            let plain = c.strip_prefix("enc:").unwrap_or(c);
+            assert!(
+                ALLOWED_COMMANDS.iter().any(|a| plain.starts_with(a)),
+                "not allow-listed: {plain}"
+            );
+            assert!(
+                !plain.contains("sps/io"),
+                "state-changing command sent: {plain}"
+            );
+            if plain.starts_with("jdev/sys/getjwt")
+                || plain.starts_with("authwithtoken")
+                || plain.starts_with("jdev/sys/refreshjwt")
+            {
+                assert!(c.starts_with("enc:"), "sent in the clear: {plain}");
+            }
+        }
+        assert!(received
+            .iter()
+            .any(|c| c.starts_with("enc:jdev/sys/getjwt/")));
+
+        // The token is kept, readable by the owner only.
+        let saved: StoredToken =
+            serde_json::from_str(&std::fs::read_to_string(&token_file).unwrap()).unwrap();
+        assert_eq!(saved.token, "tok-1");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&token_file).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
+        // No secret in the log.
+        let log = String::from_utf8(logs.0.lock().unwrap().clone()).unwrap();
+        assert!(log.contains("2 of 2 series mapped"), "{log}");
+        for secret in [
+            PASSWORD,
+            "tok-1",
+            &password_hash(HashAlg::Sha256, PASSWORD, SALT),
+        ] {
+            assert!(!log.contains(secret), "secret in the log: {secret}\n{log}");
+        }
+        let _ = std::fs::remove_file(&token_file);
+    }
+
+    // rivet: verifies REQ-LOX-003
+    #[tokio::test(flavor = "current_thread")]
+    async fn reconnects_after_a_drop_or_silence_and_reuses_the_token() {
+        for after in [After::Drop, After::Silent] {
+            let fake = Fake::new(after).await;
+            let url = serve(fake.clone()).await;
+            let st = lox_state("lox-reconnect");
+            let token_file = tmp_file("reconnect");
+            let task = tokio::spawn(run_loxone_connection(
+                st.clone(),
+                config(url, PASSWORD, token_file.clone()),
+            ));
+            wait_for("a reconnect", || *fake.accepts.lock().unwrap() >= 2).await;
+            wait_for("authentication with the stored token", || {
+                fake.received()
+                    .iter()
+                    .any(|c| c.starts_with("enc:authwithtoken/"))
+            })
+            .await;
+            task.abort();
+            // One password login, then the token.
+            let jwt = fake
+                .received()
+                .iter()
+                .filter(|c| c.starts_with("enc:jdev/sys/getjwt/"))
+                .count();
+            assert_eq!(jwt, 1);
+            let _ = std::fs::remove_file(&token_file);
+        }
+    }
+
+    // rivet: partially-verifies REQ-LOX-002
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_wrong_password_never_connects_and_stores_nothing() {
+        let fake = Fake::new(After::Stay).await;
+        let url = serve(fake.clone()).await;
+        let st = lox_state("lox-badpw");
+        let token_file = tmp_file("badpw");
+        let task = tokio::spawn(run_loxone_connection(
+            st.clone(),
+            config(url, "wrong", token_file.clone()),
+        ));
+        wait_for("two login attempts", || {
+            fake.received()
+                .iter()
+                .filter(|c| c.starts_with("enc:jdev/sys/getjwt/"))
+                .count()
+                >= 2
+        })
+        .await;
+        task.abort();
+        assert!(!st.sources.loxone.as_ref().unwrap().connected());
+        assert!(points(&st, CTRL, "Default").is_empty());
+        assert!(!token_file.exists());
+        assert!(!fake
+            .received()
+            .iter()
+            .any(|c| c.contains("enablebinstatusupdate")));
+    }
+}

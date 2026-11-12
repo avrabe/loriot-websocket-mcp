@@ -5,6 +5,7 @@
 
 mod api;
 mod import_cmd;
+mod loxone;
 mod sse;
 mod state;
 mod websocket;
@@ -30,6 +31,11 @@ Keeps home climate readings (LoRaWAN via LORIOT) and serves them over HTTP.
 Environment:
   LORIOT_WS_TOKEN  LORIOT application token (required to run)
   HAUS_STORE       time-series store file (default haus.redb)
+  LOXONE_URL       ws:// or wss:// address of a Loxone Miniserver (optional;
+                   turns the Loxone source on)
+  LOXONE_USER, LOXONE_PASSWORD   Miniserver user (required with LOXONE_URL)
+  LOXONE_TOKEN_FILE  where the Miniserver token is kept (default loxone-token.json)
+  LOXONE_MAP       optional JSON file {\"<uuid>/<field>\": \"<state name or uuid>\"}
   BIND             listen address (falls back to HOST, default 0.0.0.0)
   PORT             listen port (default 3000)
   RUST_LOG         log filter (default haus=debug,tower_http=info)";
@@ -222,14 +228,15 @@ async fn run() -> anyhow::Result<()> {
     tracing::info!("Store {store_path}: {} series", store.series()?.len());
     let ingest = std::sync::Arc::new(haus_core::ingest::Ingestor::new(std::sync::Arc::new(store)));
 
+    // The Loxone source is on when LOXONE_URL is set.
+    let loxone = loxone::LoxoneConfig::from_env().map_err(|e| anyhow::anyhow!(e))?;
+    let sources = Sources {
+        loriot: UpstreamHealth::default(),
+        loxone: loxone.as_ref().map(|_| UpstreamHealth::default()),
+    };
+
     // Create shared application state
-    let state = AppState::new(
-        storage,
-        device_names,
-        config.clone(),
-        ingest,
-        Sources::default(),
-    );
+    let state = AppState::new(storage, device_names, config.clone(), ingest, sources);
 
     // Build main API router
     let app = Router::new()
@@ -257,6 +264,13 @@ async fn run() -> anyhow::Result<()> {
     tokio::spawn(async move {
         websocket::run_loriot_connection(ws_state).await;
     });
+
+    if let Some(cfg) = loxone {
+        let lox_state = state.clone();
+        tokio::spawn(async move {
+            loxone::run_loxone_connection(lox_state, cfg).await;
+        });
+    }
 
     // Start the server
     let host = bind_host(std::env::var("BIND").ok(), std::env::var("HOST").ok());
