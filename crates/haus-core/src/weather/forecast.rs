@@ -475,11 +475,11 @@ mod tests {
     #[test]
     fn test_build_url() {
         let fetcher = ForecastFetcher::new(7);
-        let coords = Coordinates::new(51.45, 7.0);
+        let coords = Coordinates::new(50.11, 8.68);
         let url = fetcher.build_url(&coords);
 
-        assert!(url.contains("latitude=51.45"));
-        assert!(url.contains("longitude=7.0"));
+        assert!(url.contains("latitude=50.11"));
+        assert!(url.contains("longitude=8.68"));
         assert!(url.contains("forecast_days=7"));
     }
 

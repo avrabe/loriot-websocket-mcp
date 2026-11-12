@@ -52,7 +52,7 @@ artifacts:
   - id: REQ-STORE-001
     type: requirement
     title: The full history is stored durably and queried without stalling
-    status: verified
+    status: implemented
     release: v0.4.0
     description: >
       All points of all series are kept on disk. Range queries read only the

@@ -124,12 +124,20 @@ impl AppState {
         let name = reading.name.clone().unwrap_or_else(|| reading.eui.clone());
         let items = loriot_items(&reading, &name);
         let ingest = self.ingest.clone();
-        run_blocking(move || -> haus_core::Result<()> {
+        let persisted = run_blocking(move || -> haus_core::Result<()> {
             disk.append_line(&line)?;
             ingest.ingest(&items)?;
             Ok(())
         })
-        .await?;
+        .await;
+        if let Err(e) = persisted {
+            // Not persisted: forget it, so a redelivery is stored, not dropped.
+            self.storage
+                .write()
+                .await
+                .forget_reading(&reading.eui, reading.ts);
+            return Err(e);
+        }
         let _ = self.reading_tx.send(reading);
         Ok(true)
     }
@@ -183,7 +191,7 @@ pub(crate) mod tests {
         .unwrap()
     }
 
-    // rivet: verifies REQ-STORE-001
+    // rivet: partially-verifies REQ-STORE-001
     #[tokio::test]
     async fn add_reading_persists_once_and_dedupes() {
         let state = test_state("add", AppConfig::default());
@@ -211,5 +219,34 @@ pub(crate) mod tests {
             .unwrap()
             .expect("temperature series");
         assert_eq!(store.range(id, 0, 10).unwrap(), vec![(1, 21.5), (2, 21.5)]);
+    }
+
+    #[tokio::test]
+    async fn a_reading_that_failed_to_persist_is_stored_on_redelivery() {
+        let state = test_state("redeliver", AppConfig::default());
+        // Point the history file into a directory that does not exist yet.
+        let dir = std::env::temp_dir().join(format!(
+            "haus-redeliver-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let file = dir.join("h.jsonl");
+        {
+            let mut storage = state.storage.write().await;
+            *storage = StorageManager::new(StorageConfig {
+                file_path: file.to_string_lossy().into_owned(),
+                ..Default::default()
+            });
+        }
+        assert!(state.add_reading(reading(7)).await.is_err());
+        assert_eq!(state.storage.read().await.reading_count(), 0);
+
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(state.add_reading(reading(7)).await.unwrap());
+        assert_eq!(std::fs::read_to_string(&file).unwrap().lines().count(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

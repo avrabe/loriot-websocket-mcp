@@ -297,6 +297,15 @@ impl StorageManager {
         Ok(Some(line))
     }
 
+    /// Undo [`Self::insert_reading`] for a reading whose persistence failed,
+    /// so a redelivery of it is not dropped as a duplicate.
+    pub fn forget_reading(&mut self, eui: &str, ts: u64) {
+        if self.seen_keys.remove(&format!("{eui}:{ts}")) {
+            self.total_readings_count = self.total_readings_count.saturating_sub(1);
+            self.memory_cache.retain(|r| !(r.eui == eui && r.ts == ts));
+        }
+    }
+
     /// Get all readings in memory
     pub fn get_readings(&self) -> &[SensorReading] {
         &self.memory_cache

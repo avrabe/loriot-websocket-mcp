@@ -324,12 +324,25 @@ pub fn import_stats4lox(store: &Store, dir: &Path) -> Result<ImportReport, Impor
         let sub = m["dir"]
             .as_str()
             .ok_or_else(|| fmt(format!("{name}: no `dir`")))?;
-        let fields: Vec<String> = m["fields"]
+        let raw_fields = m["fields"]
             .as_array()
-            .ok_or_else(|| fmt(format!("{name}: no `fields`")))?
+            .ok_or_else(|| fmt(format!("{name}: no `fields`")))?;
+        let fields: Vec<String> = raw_fields
             .iter()
             .filter_map(|f| f.as_str().map(str::to_string))
             .collect();
+        if fields.is_empty() || fields.len() != raw_fields.len() {
+            report.problems.push(format!(
+                "{name}: `fields` must be a non-empty list of names, got {}",
+                m["fields"]
+            ));
+            continue;
+        }
+        // With the tag list known, any other key in a point is a field the
+        // manifest does not count: the import would not check it.
+        let tags: Option<Vec<&str>> = m["tags"]
+            .as_array()
+            .map(|t| t.iter().filter_map(Value::as_str).collect());
         let counts = m["influx_counts"].as_object();
 
         let mdir = dir.join(sub);
@@ -368,6 +381,18 @@ pub fn import_stats4lox(store: &Store, dir: &Path) -> Result<ImportReport, Impor
                     continue;
                 }
                 let ts = time_ns / 1_000_000;
+                if let (Some(tags), Some(obj)) = (&tags, p.as_object()) {
+                    if let Some(k) = obj.keys().find(|k| {
+                        k.as_str() != "time"
+                            && !tags.contains(&k.as_str())
+                            && !fields.iter().any(|f| f == *k)
+                    }) {
+                        report.problems.push(format!(
+                            "{at}: `{k}` is neither a field nor a tag in the manifest"
+                        ));
+                        continue;
+                    }
+                }
                 let Some(uuid) = p["uuid"].as_str().filter(|u| !u.is_empty()) else {
                     without_uuid += 1;
                     continue;
@@ -607,7 +632,8 @@ mod tests {
             }
             m.insert(
                 name.to_string(),
-                json!({"dir": sub, "fields": fields, "influx_counts": counts}),
+                json!({"dir": sub, "fields": fields, "influx_counts": counts,
+                       "tags": ["category", "name", "room", "type", "uuid"]}),
             );
         }
         std::fs::write(
@@ -826,6 +852,18 @@ mod tests {
             ),
             // No count for a field.
             (json!({}), vec![ok(1)], "no InfluxDB count"),
+            // A key the manifest lists neither as field nor as tag.
+            (
+                json!({"Default": 1}),
+                vec![point(
+                    1,
+                    Some("u"),
+                    t,
+                    "Temperatur",
+                    json!({"Default": 1, "Extra": 2}),
+                )],
+                "neither a field nor a tag",
+            ),
         ];
         for (counts, points, want) in cases {
             let d = tmpdir("s4l-bad");
@@ -835,6 +873,31 @@ mod tests {
             assert!(
                 r.problems.iter().any(|p| p.contains(want)),
                 "{want:?} not in {:?}",
+                r.problems
+            );
+            let _ = std::fs::remove_dir_all(&d);
+        }
+        // A measurement without field names is a problem, not an empty success.
+        for fields in [json!([]), json!([1])] {
+            let d = tmpdir("s4l-nofields");
+            export(
+                &d,
+                &[(
+                    t,
+                    &["Default"],
+                    json!({"Default": 1}),
+                    &[("2026-01", vec![ok(1)])],
+                )],
+            );
+            let mf = d.join("manifest.json");
+            let mut v: Value =
+                serde_json::from_str(&std::fs::read_to_string(&mf).unwrap()).unwrap();
+            v["measurements"][t]["fields"] = fields;
+            std::fs::write(&mf, v.to_string()).unwrap();
+            let r = import_stats4lox(&store_in(&d), &d).unwrap();
+            assert!(
+                r.problems.iter().any(|p| p.contains("`fields` must be")),
+                "{:?}",
                 r.problems
             );
             let _ = std::fs::remove_dir_all(&d);

@@ -116,7 +116,7 @@ mod tests {
         }
     }
 
-    // rivet: partially-verifies REQ-LORIOT-001
+    // rivet: partially-verifies REQ-IMPORT-001
     #[test]
     fn live_and_imported_readings_store_the_same_values() {
         let dir = std::env::temp_dir().join(format!(
@@ -128,7 +128,7 @@ mod tests {
                 .as_nanos()
         ));
         std::fs::create_dir_all(&dir).unwrap();
-        let line = r#"{"cmd":"rx","eui":"00000000000000A1","data":"","ts":1753863966004,"name":null,"parsed_temperature":18.88,"parsed_humidity":64.7,"parsed_battery_voltage":3.03,"parsed_battery_status":"Good","parsed_activity":true,"parsed_movement_count":297}"#;
+        let line = r#"{"cmd":"rx","eui":"00000000000000A1","data":"","ts":1753863966004,"name":null,"parsed_temperature":18.88,"parsed_humidity":64.7,"parsed_battery_voltage":3.03,"parsed_battery_status":"Good","parsed_activity":true,"parsed_movement_count":297,"parsed_lux":412}"#;
         let file = dir.join("h.jsonl");
         std::fs::write(&file, format!("{line}\n")).unwrap();
 
@@ -136,16 +136,16 @@ mod tests {
         let store = Arc::new(Store::open(dir.join("s.redb")).unwrap());
         let reading: SensorReading = serde_json::from_str(line).unwrap();
         let items = loriot_items(&reading, "00000000000000A1");
-        assert_eq!(items.len(), 5);
+        assert_eq!(items.len(), 6);
         let ing = Ingestor::new(store.clone());
-        assert_eq!(ing.ingest(&items).unwrap().inserted, 5);
+        assert_eq!(ing.ingest(&items).unwrap().inserted, 6);
         // Ingesting again uses the cached ids and changes nothing.
-        assert_eq!(ing.ingest(&items).unwrap().unchanged, 5);
+        assert_eq!(ing.ingest(&items).unwrap().unchanged, 6);
 
         let r = import_loriot(&store, &file, &HashMap::new()).unwrap();
         assert!(r.ok(), "{:?}", r.problems);
         assert_eq!(r.total_inserted(), 0);
-        assert_eq!(r.series.iter().map(|s| s.unchanged).sum::<u64>(), 5);
+        assert_eq!(r.series.iter().map(|s| s.unchanged).sum::<u64>(), 6);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

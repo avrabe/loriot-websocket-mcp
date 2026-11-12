@@ -286,6 +286,8 @@ mod tests {
             code: 0,
             stdout: format!("haus {}", env!("CARGO_PKG_VERSION")),
         };
+        assert_eq!(env!("CARGO_PKG_NAME"), "haus");
+        assert_eq!(env!("CARGO_BIN_NAME"), "haus");
         assert_eq!(parse_args(args(&["--version"])), want);
         assert_eq!(parse_args(args(&["-V"])), want);
     }

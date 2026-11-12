@@ -425,6 +425,7 @@ mod tests {
         assert_reconnects(Upstream::DropTcp, fast(), Duration::from_secs(6)).await;
     }
 
+    // rivet: verifies REQ-LORIOT-001
     #[tokio::test(flavor = "current_thread")]
     async fn reconnects_when_handshake_never_completes() {
         // Uses the production connect timeout on purpose.
@@ -447,6 +448,20 @@ mod tests {
         );
     }
 
+    // rivet: verifies REQ-LORIOT-001
+    #[test]
+    fn the_production_timings_are_the_specified_ones() {
+        let c = LoriotClientConfig::default();
+        assert_eq!(c.ping_interval, Duration::from_secs(30));
+        assert_eq!(c.pong_timeout, Duration::from_secs(75));
+        assert!(c.connect_timeout > Duration::ZERO && c.connect_timeout <= Duration::from_secs(30));
+        assert!(c.write_timeout > Duration::ZERO && c.write_timeout <= Duration::from_secs(30));
+        assert_eq!(backoff_delay(&c, 1), Duration::from_secs(1));
+        assert_eq!(backoff_delay(&c, 7), Duration::from_secs(60));
+        assert_eq!(backoff_delay(&c, 100), Duration::from_secs(60));
+    }
+
+    // rivet: verifies REQ-LORIOT-001
     #[test]
     fn backoff_is_exponential_and_capped() {
         let cfg = LoriotClientConfig::default();
