@@ -7,7 +7,7 @@ artifacts:
   - id: L-001
     type: loss
     title: Recorded home climate history is lost
-    status: draft
+    status: approved
     description: >
       The LoRaWAN readings (since 2025-07) and the Loxone Stats4Lox history
       (about 1.8 years of 5-minute temperature, humidity and heating data) are
@@ -18,7 +18,7 @@ artifacts:
   - id: L-002
     type: loss
     title: The owner acts on a wrong picture of the home
-    status: draft
+    status: approved
     description: >
       The owner believes a room's temperature, humidity or heating state is
       something it is not (a stale value shown as current, a value shown for the
@@ -31,7 +31,7 @@ artifacts:
   - id: L-003
     type: loss
     title: The home automation is compromised through haus
-    status: draft
+    status: approved
     description: >
       The Loxone Miniserver credentials haus holds are disclosed or misused, so
       someone other than the owner can read or operate the home's controls.
@@ -41,7 +41,7 @@ artifacts:
   - id: L-004
     type: loss
     title: Other services on the host are degraded
-    status: draft
+    status: approved
     description: >
       haus exhausts memory, CPU or disk on the shared Raspberry Pi 4 and takes
       down or degrades the other services on the same host.
@@ -51,7 +51,7 @@ artifacts:
   - id: H-001
     type: hazard
     title: Import or migration drops, duplicates or alters points
-    status: draft
+    status: approved
     description: >
       An import of the LoRaWAN JSONL or the Stats4Lox export, or a storage
       migration, completes without error while the stored series differ from
@@ -67,7 +67,7 @@ artifacts:
   - id: H-002
     type: hazard
     title: A previous logger is decommissioned while it holds data haus does not
-    status: draft
+    status: approved
     description: >
       A Stats4Lox logger that haus replaces is switched off before haus holds
       every point it recorded after the last export, or before haus's live
@@ -81,7 +81,7 @@ artifacts:
   - id: H-003
     type: hazard
     title: A stale or missing value is presented as current
-    status: draft
+    status: approved
     description: >
       The dashboard shows the last known value without its age, or draws a
       trend line across a period with no data, so an outage of a sensor or a
@@ -95,7 +95,7 @@ artifacts:
   - id: H-004
     type: hazard
     title: A value is attributed to the wrong sensor or room
-    status: draft
+    status: approved
     description: >
       A live Loxone event or an imported point lands in another sensor's series,
       for example because series are matched by display name and names are
@@ -111,7 +111,7 @@ artifacts:
   - id: H-005
     type: hazard
     title: Miniserver credentials are exposed or used beyond reading
-    status: draft
+    status: approved
     description: >
       The Loxone user's password or token reaches the repository, a log line, a
       world-readable file, a URL, or the dashboard; or haus sends commands that
@@ -125,7 +125,7 @@ artifacts:
   - id: H-006
     type: hazard
     title: haus exceeds its resource budget on the host
-    status: draft
+    status: approved
     description: >
       With the full imported history, haus uses more memory than its unit allows
       (its service unit's memory limit) or blocks its runtime long enough that requests
@@ -141,7 +141,7 @@ artifacts:
   - id: H-007
     type: hazard
     title: Ingestion from a source stops silently
-    status: draft
+    status: approved
     description: >
       The LORIOT or the Miniserver connection is dead, hung or rejected, and
       nothing outside the process can tell; points are not recorded.
@@ -156,7 +156,7 @@ artifacts:
   - id: SC-001
     type: system-constraint
     title: An import must prove it reproduced its source
-    status: draft
+    status: approved
     description: >
       Every import SHALL compare, per sensor and field, the number of points
       stored against the source's own count, and SHALL fail (non-zero exit,
@@ -169,7 +169,7 @@ artifacts:
   - id: SC-002
     type: system-constraint
     title: A logger is replaced only after a measured overlap
-    status: draft
+    status: approved
     description: >
       haus SHALL let an operator show, before a Stats4Lox logger is switched
       off, that haus has ingested the Miniserver live for the same series over
@@ -182,7 +182,9 @@ artifacts:
   - id: SC-003
     type: system-constraint
     title: Every shown value carries its age; gaps stay gaps
-    status: draft
+    status: approved
+    description: >
+      Every value the dashboard shows carries the time it was measured, and trends break at gaps instead of drawing across them.
     links:
       - type: prevents
         target: H-003
@@ -190,7 +192,7 @@ artifacts:
   - id: SC-004
     type: system-constraint
     title: Series identity is the source's stable id, never a display name
-    status: draft
+    status: approved
     description: >
       Loxone series SHALL be keyed by the control/state UUID, LoRaWAN series by
       the device EUI. Names are labels only.
@@ -201,7 +203,7 @@ artifacts:
   - id: SC-005
     type: system-constraint
     title: Miniserver credentials stay secret and haus only reads
-    status: draft
+    status: approved
     description: >
       Credentials SHALL come only from the service's environment file, SHALL NOT
       be logged, rendered or put into URLs, and haus SHALL send the Miniserver no
@@ -213,7 +215,9 @@ artifacts:
   - id: SC-006
     type: system-constraint
     title: haus stays inside its resource budget with the full history
-    status: draft
+    status: approved
+    description: >
+      With the full history stored, haus stays within the memory its service unit allows and never blocks its runtime on storage IO.
     links:
       - type: prevents
         target: H-006
@@ -221,7 +225,7 @@ artifacts:
   - id: SC-007
     type: system-constraint
     title: Each source's connection state is observable from outside
-    status: draft
+    status: approved
     description: >
       Per source: connected or not, time of the last message. Dead or silent
       connections SHALL be detected and reconnected with backoff.

@@ -8,7 +8,7 @@ artifacts:
   - id: REQ-NAME-001
     type: requirement
     title: The project, crates and binary are named haus
-    status: draft
+    status: approved
     release: v0.4.0
     description: >
       loriot-websocket-mcp becomes haus. LORIOT (LoRaWAN) and Loxone are
@@ -21,7 +21,7 @@ artifacts:
   - id: REQ-TRACE-001
     type: requirement
     title: Artifacts are tracked with rivet and validated in CI
-    status: draft
+    status: approved
     release: v0.4.0
     description: >
       Requirements, decisions, the STPA analysis and tests live in artifacts/
@@ -35,7 +35,7 @@ artifacts:
   - id: REQ-MODEL-001
     type: requirement
     title: One data model for every source
-    status: draft
+    status: approved
     release: v0.4.0
     description: >
       Readings are stored as source → sensor → series. A sensor has a source
@@ -52,7 +52,7 @@ artifacts:
   - id: REQ-STORE-001
     type: requirement
     title: The full history is stored durably and queried without stalling
-    status: draft
+    status: approved
     release: v0.4.0
     description: >
       All points of all series are kept on disk. Range queries read only the
@@ -68,7 +68,7 @@ artifacts:
   - id: REQ-RES-001
     type: requirement
     title: Resource budget on a Raspberry Pi 4 class host
-    status: draft
+    status: approved
     release: v0.4.0
     description: >
       With about 10M stored points, haus stays under 512 MB of memory on a
@@ -85,7 +85,7 @@ artifacts:
   - id: REQ-IMPORT-001
     type: requirement
     title: Import the LoRaWAN history with a count check
-    status: draft
+    status: approved
     release: v0.4.0
     description: >
       `haus import loriot <sensor_history.jsonl>` stores every reading. It fails
@@ -101,7 +101,7 @@ artifacts:
   - id: REQ-IMPORT-002
     type: requirement
     title: Import the Stats4Lox export with a count check
-    status: draft
+    status: approved
     release: v0.4.0
     description: >
       `haus import stats4lox <dir>` reads a Stats4Lox InfluxDB export
@@ -123,7 +123,7 @@ artifacts:
   - id: REQ-LORIOT-001
     type: requirement
     title: LORIOT websocket ingestion keeps its current guarantees
-    status: draft
+    status: approved
     release: v0.4.0
     description: >
       The existing client's behaviour carries over: bounded handshake and
@@ -139,7 +139,7 @@ artifacts:
   - id: REQ-LOX-001
     type: requirement
     title: Live Loxone values from the Miniserver websocket
-    status: draft
+    status: approved
     release: v0.4.0
     description: >
       haus connects to the Miniserver's websocket with token authentication,
@@ -158,7 +158,7 @@ artifacts:
   - id: REQ-LOX-002
     type: requirement
     title: The Miniserver connection is read-only and its credentials secret
-    status: draft
+    status: approved
     release: v0.4.0
     description: >
       Credentials come only from the service's environment file. They never
@@ -175,7 +175,7 @@ artifacts:
   - id: REQ-LOX-003
     type: requirement
     title: The Miniserver connection recovers and reports its state
-    status: draft
+    status: approved
     release: v0.4.0
     description: >
       Keep-alive, silent-connection detection, token refresh and reconnect with
@@ -190,7 +190,7 @@ artifacts:
   - id: REQ-HEALTH-001
     type: requirement
     title: /health reports every source
-    status: draft
+    status: approved
     release: v0.4.0
     description: >
       GET /health answers 200 while the process lives and carries, per source,
@@ -207,7 +207,7 @@ artifacts:
   - id: REQ-UI-001
     type: requirement
     title: Overview of all rooms
-    status: draft
+    status: approved
     release: v0.4.0
     description: >
       One page lists every room with its latest temperature, humidity and
@@ -222,7 +222,7 @@ artifacts:
   - id: REQ-UI-002
     type: requirement
     title: Sensor detail with trends
-    status: draft
+    status: approved
     release: v0.4.0
     description: >
       Per sensor, server-rendered SVG trends for 1 h, 24 h, 7 d and 90 d,
@@ -237,7 +237,7 @@ artifacts:
   - id: REQ-UI-003
     type: requirement
     title: Health page for sensors and sources
-    status: draft
+    status: approved
     release: v0.4.0
     description: >
       Connection state per source, last value age per sensor, battery voltage
@@ -254,7 +254,7 @@ artifacts:
   - id: REQ-UI-004
     type: requirement
     title: The dashboard builds without wasm or npm
-    status: draft
+    status: approved
     release: v0.4.0
     description: >
       Pages are rendered by the server; the only browser script is vendored htmx
@@ -267,7 +267,7 @@ artifacts:
   - id: REQ-DEPLOY-001
     type: requirement
     title: A signed linux-arm64 release that deployment tooling can verify
-    status: draft
+    status: approved
     release: v0.4.0
     description: >
       Tags build static binaries with SHA256SUMS.txt signed by cosign (keyless,
@@ -280,7 +280,7 @@ artifacts:
   - id: REQ-RETIRE-001
     type: requirement
     title: Compare haus against a Stats4Lox logger it replaces
-    status: draft
+    status: approved
     release: v0.4.0
     description: >
       `haus compare stats4lox <dir>` reports, per series, whether haus's value
