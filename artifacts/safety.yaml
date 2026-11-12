@@ -1,0 +1,230 @@
+artifacts:
+  # ============================================================
+  # STPA seed: losses, hazards, system constraints for haus.
+  # Draft: the top of the V, authored before the code it constrains.
+  # ============================================================
+
+  - id: L-001
+    type: loss
+    title: Recorded home climate history is lost
+    status: draft
+    description: >
+      The LoRaWAN readings (since 2025-07) and the Loxone Stats4Lox history
+      (about 1.8 years of 5-minute temperature, humidity and heating data) are
+      partly or wholly lost, or silently altered. They cannot be re-measured.
+    fields:
+      stakeholders: [owner]
+
+  - id: L-002
+    type: loss
+    title: The owner acts on a wrong picture of the home
+    status: draft
+    description: >
+      The owner believes a room's temperature, humidity or heating state is
+      something it is not (a stale value shown as current, a value shown for the
+      wrong room, a line drawn across an outage), and decides on that basis, for
+      example misses mold-risk humidity in the cellar or a heating circuit that
+      stopped.
+    fields:
+      stakeholders: [owner]
+
+  - id: L-003
+    type: loss
+    title: The home automation is compromised through haus
+    status: draft
+    description: >
+      The Loxone Miniserver credentials haus holds are disclosed or misused, so
+      someone other than the owner can read or operate the home's controls.
+    fields:
+      stakeholders: [owner, household]
+
+  - id: L-004
+    type: loss
+    title: Other services on the host are degraded
+    status: draft
+    description: >
+      haus exhausts memory, CPU or disk on the shared Raspberry Pi 4 and takes
+      down or degrades the other services on the same host.
+    fields:
+      stakeholders: [owner]
+
+  - id: H-001
+    type: hazard
+    title: Import or migration drops, duplicates or alters points
+    status: draft
+    description: >
+      An import of the LoRaWAN JSONL or the Stats4Lox export, or a storage
+      migration, completes without error while the stored series differ from
+      the source in count or value.
+    fields:
+      severity: critical
+    links:
+      - type: leads-to-loss
+        target: L-001
+      - type: leads-to-loss
+        target: L-002
+
+  - id: H-002
+    type: hazard
+    title: A previous logger is decommissioned while it holds data haus does not
+    status: draft
+    description: >
+      A Stats4Lox logger that haus replaces is switched off before haus holds
+      every point it recorded after the last export, or before haus's live
+      Loxone feed has been shown to cover the same series.
+    fields:
+      severity: critical
+    links:
+      - type: leads-to-loss
+        target: L-001
+
+  - id: H-003
+    type: hazard
+    title: A stale or missing value is presented as current
+    status: draft
+    description: >
+      The dashboard shows the last known value without its age, or draws a
+      trend line across a period with no data, so an outage of a sensor or a
+      source reads as a steady state.
+    fields:
+      severity: marginal
+    links:
+      - type: leads-to-loss
+        target: L-002
+
+  - id: H-004
+    type: hazard
+    title: A value is attributed to the wrong sensor or room
+    status: draft
+    description: >
+      A live Loxone event or an imported point lands in another sensor's series,
+      for example because series are matched by display name and names are
+      renamed, duplicated or normalised differently.
+    fields:
+      severity: marginal
+    links:
+      - type: leads-to-loss
+        target: L-001
+      - type: leads-to-loss
+        target: L-002
+
+  - id: H-005
+    type: hazard
+    title: Miniserver credentials are exposed or used beyond reading
+    status: draft
+    description: >
+      The Loxone user's password or token reaches the repository, a log line, a
+      world-readable file, a URL, or the dashboard; or haus sends commands that
+      change the state of the home.
+    fields:
+      severity: critical
+    links:
+      - type: leads-to-loss
+        target: L-003
+
+  - id: H-006
+    type: hazard
+    title: haus exceeds its resource budget on the host
+    status: draft
+    description: >
+      With the full imported history, haus uses more memory than its unit allows
+      (its service unit's memory limit) or blocks its runtime long enough that requests
+      and ingestion stall.
+    fields:
+      severity: marginal
+    links:
+      - type: leads-to-loss
+        target: L-004
+      - type: leads-to-loss
+        target: L-001
+
+  - id: H-007
+    type: hazard
+    title: Ingestion from a source stops silently
+    status: draft
+    description: >
+      The LORIOT or the Miniserver connection is dead, hung or rejected, and
+      nothing outside the process can tell; points are not recorded.
+    fields:
+      severity: critical
+    links:
+      - type: leads-to-loss
+        target: L-001
+      - type: leads-to-loss
+        target: L-002
+
+  - id: SC-001
+    type: system-constraint
+    title: An import must prove it reproduced its source
+    status: draft
+    description: >
+      Every import SHALL compare, per sensor and field, the number of points
+      stored against the source's own count, and SHALL fail (non-zero exit,
+      nothing reported as done) on any difference. Re-running an import SHALL
+      NOT create duplicates.
+    links:
+      - type: prevents
+        target: H-001
+
+  - id: SC-002
+    type: system-constraint
+    title: A logger is replaced only after a measured overlap
+    status: draft
+    description: >
+      haus SHALL let an operator show, before a Stats4Lox logger is switched
+      off, that haus has ingested the Miniserver live for the same series over
+      an overlap period and that a final delta export has been imported and
+      count-checked.
+    links:
+      - type: prevents
+        target: H-002
+
+  - id: SC-003
+    type: system-constraint
+    title: Every shown value carries its age; gaps stay gaps
+    status: draft
+    links:
+      - type: prevents
+        target: H-003
+
+  - id: SC-004
+    type: system-constraint
+    title: Series identity is the source's stable id, never a display name
+    status: draft
+    description: >
+      Loxone series SHALL be keyed by the control/state UUID, LoRaWAN series by
+      the device EUI. Names are labels only.
+    links:
+      - type: prevents
+        target: H-004
+
+  - id: SC-005
+    type: system-constraint
+    title: Miniserver credentials stay secret and haus only reads
+    status: draft
+    description: >
+      Credentials SHALL come only from the service's environment file, SHALL NOT
+      be logged, rendered or put into URLs, and haus SHALL send the Miniserver no
+      command that changes the home's state.
+    links:
+      - type: prevents
+        target: H-005
+
+  - id: SC-006
+    type: system-constraint
+    title: haus stays inside its resource budget with the full history
+    status: draft
+    links:
+      - type: prevents
+        target: H-006
+
+  - id: SC-007
+    type: system-constraint
+    title: Each source's connection state is observable from outside
+    status: draft
+    description: >
+      Per source: connected or not, time of the last message. Dead or silent
+      connections SHALL be detected and reconnected with backoff.
+    links:
+      - type: prevents
+        target: H-007

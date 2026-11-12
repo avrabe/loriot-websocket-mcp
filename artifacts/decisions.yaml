@@ -1,0 +1,205 @@
+artifacts:
+  - id: DD-001
+    type: design-decision
+    title: Pin the toolchain to varve's covalent realm
+    status: draft
+    release: v0.4.0
+    fields:
+      decision: >
+        varve.toml pins realm `covalent` (channel rolling); varve-realms.toml
+        carries the pulseengine, pulseengine-wasm and covalent roots. CI gets
+        rivet from the pinned layer.
+      rationale: >
+        One pin gives both the traceability tools (rivet, spar, witness) and
+        the component-model tools, each verified against its own realm root,
+        so a later move to WebAssembly components (for example toward wohl)
+        needs no second pin.
+      alternatives: >
+        Pin the pulseengine realm only (enough for rivet today); install rivet
+        with cargo (unsigned, unpinned).
+    links:
+      - type: satisfies
+        target: REQ-TRACE-001
+
+  - id: DD-002
+    type: design-decision
+    title: Server-rendered htmx dashboard, as warte does it
+    status: draft
+    release: v0.4.0
+    fields:
+      decision: >
+        axum handlers render HTML from include_str! templates; vendored htmx
+        swaps partials; SSE pushes refreshes; trends are SVG paths drawn on the
+        server, bucketed, restarting the path after every gap
+        (pulseengine/warte src/dashboard, charts.rs). The loriot-web crate
+        (Leptos, trunk, tailwind, npm) is removed.
+      rationale: >
+        One binary with no wasm or node toolchain in the build or the release;
+        the page is a function of the stored data, so a test can assert what a
+        page shows. Same pattern as pulseengine/warte.
+      alternatives: >
+        Keep Leptos (CSR wasm, needs trunk and npm in CI and a separate asset
+        tarball); a JS charting library (gap handling is the library's, not
+        ours).
+    links:
+      - type: satisfies
+        target: REQ-UI-001
+      - type: satisfies
+        target: REQ-UI-002
+      - type: satisfies
+        target: REQ-UI-003
+      - type: satisfies
+        target: REQ-UI-004
+
+  - id: DD-003
+    type: design-decision
+    title: redb as the time-series store
+    status: draft
+    release: v0.4.0
+    fields:
+      decision: >
+        One redb file. Key (series id, timestamp), value the reading; a series
+        table maps source ids (UUID, EUI) to series ids. Writes are batched;
+        reads and writes run on blocking threads.
+      rationale: >
+        A multi-year Loxone history is millions of points; the 0.3.0 store (an
+        append-only JSONL read in full for every history query) cannot serve
+        range queries on that within 512 MB on a Pi. redb is pure Rust, embedded, one file,
+        and is what warte uses for its machine history (REQ-MHIST-001 there).
+        To be confirmed by REQ-RES-001's measurement on the target hardware.
+      alternatives: >
+        SQLite (sqlx); keep InfluxDB on another host (the dependency being
+        retired); JSONL per month with an index.
+    links:
+      - type: satisfies
+        target: REQ-STORE-001
+      - type: satisfies
+        target: REQ-RES-001
+
+  - id: DD-004
+    type: design-decision
+    title: Live Loxone data straight from the Miniserver websocket
+    status: draft
+    release: v0.4.0
+    fields:
+      decision: >
+        haus speaks the Miniserver websocket protocol itself (token auth,
+        enablebinstatusupdate, value-event tables keyed by UUID). Token
+        acquisition (getkey2, getjwt) follows the client in avrabe/mcp-loxone.
+      rationale: >
+        Reading the Miniserver directly needs no logger (LoxBerry with
+        Stats4Lox and InfluxDB) between it and haus, and gives every change
+        rather than periodic samples.
+      alternatives: >
+        Poll a Stats4Lox InfluxDB (keeps that logger in the chain);
+        poll the Miniserver's HTTP /jdev/sps/io API (no events, one request per
+        state).
+    links:
+      - type: satisfies
+        target: REQ-LOX-001
+      - type: satisfies
+        target: REQ-LOX-003
+      - type: satisfies
+        target: REQ-RETIRE-001
+
+  - id: DD-005
+    type: design-decision
+    title: Loxone series are identified by UUID
+    status: draft
+    release: v0.4.0
+    fields:
+      decision: >
+        Every Stats4Lox point carries the Loxone `uuid` of its source; the
+        import keys series by it and the live client subscribes to the same
+        UUIDs, so history and live data join without matching names.
+      rationale: >
+        Stats4Lox measurement names are display names that are renamed and
+        de-duplicated with suffixes (`Temperature_2`);
+        a UUID is stable.
+      alternatives: Match by measurement name; a hand-written name map.
+    links:
+      - type: satisfies
+        target: REQ-IMPORT-002
+      - type: satisfies
+        target: REQ-LOX-001
+      - type: satisfies
+        target: REQ-MODEL-001
+
+  - id: DD-006
+    type: design-decision
+    title: Count checks in the import, as the export did
+    status: draft
+    release: v0.4.0
+    fields:
+      decision: >
+        Each import ends by counting what it stored per series and field and
+        comparing with the source (the JSONL itself; the manifest's
+        influx_counts), exiting non-zero on any difference.
+      rationale: >
+        The export carries InfluxDB's own count(field) per measurement;
+        checking the import against it keeps the chain closed from InfluxDB
+        to haus.
+      alternatives: Spot-check a few series by hand.
+    links:
+      - type: satisfies
+        target: REQ-IMPORT-001
+      - type: satisfies
+        target: REQ-IMPORT-002
+
+  - id: DD-007
+    type: design-decision
+    title: Stay separate from wohl, feed it later
+    status: draft
+    fields:
+      decision: >
+        haus remains its own collector and dashboard; integration with
+        pulseengine/wohl is a later release that publishes streams to it.
+      rationale: >
+        wohl's monitors expect its own CCSDS sensor nodes; haus's job is
+        ingesting existing LoRaWAN and Loxone sources. Owner decision
+        2026-11-12.
+      alternatives: Fold haus into wohl as its ingestion and dashboard.
+    links:
+      - type: satisfies
+        target: REQ-WOHL-001
+
+  - id: DD-008
+    type: design-decision
+    title: v0.4.0 scope is the core, under the name haus
+    status: draft
+    release: v0.4.0
+    fields:
+      decision: >
+        Rename to haus; remove the unwired MCP server; ship overview, sensor
+        detail and health pages only; the 0.3.0 weather, heat pump, thermal,
+        forecast and energy pages come back one per release.
+      rationale: >
+        Owner decisions 2026-11-12. The release's value is all climate data in
+        one place; every extra page is a rewrite to the
+        server-rendered style that does not move that.
+      alternatives: Port all eleven 0.3.0 pages before releasing; keep MCP.
+    links:
+      - type: satisfies
+        target: REQ-NAME-001
+      - type: satisfies
+        target: REQ-MCP-001
+      - type: satisfies
+        target: REQ-UI-005
+
+  - id: DD-009
+    type: design-decision
+    title: Keep the 0.3.0 release pipeline
+    status: draft
+    release: v0.4.0
+    fields:
+      decision: >
+        release.yml keeps building static musl binaries, a CycloneDX SBOM and
+        SHA256SUMS.txt with a keyless cosign bundle; only names change and the
+        assets tarball goes away (the pages are in the binary).
+      rationale: >
+        Existing deployment tooling already verifies exactly this shape against
+        the release workflow identity; v0.3.0 was deployed that way.
+      alternatives: Move to sigil-signed releases now.
+    links:
+      - type: satisfies
+        target: REQ-DEPLOY-001

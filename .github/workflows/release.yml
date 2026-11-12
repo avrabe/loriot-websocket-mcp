@@ -1,6 +1,6 @@
 name: Release
 
-# Assets (PulseEngine release standard, the names smithy's fetch script checks):
+# Assets (PulseEngine release standard, the names deployment tooling checks):
 #   loriot-server-<ver>-linux-arm64    raw static binary, aarch64 musl (Raspberry Pi)
 #   loriot-server-<ver>-linux-amd64    raw static binary, x86_64 musl
 #   loriot-server-<ver>-macos-arm64   raw binary, Apple silicon
