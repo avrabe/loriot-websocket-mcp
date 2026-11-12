@@ -48,6 +48,8 @@ Environment:
                    history was imported; name and room come from the Miniserver
   HAUS_BASE_PATH   path prefix behind a reverse proxy that keeps it, e.g. /haus:
                    every route and link is served under it (default none)
+  HAUS_NAV, HAUS_NAV_SELF   optional home link and app switcher: a nav v1
+                   JSON file and this app's id in it (both or neither)
   BIND             listen address (falls back to HOST, default 0.0.0.0)
   PORT             listen port (default 3000)
   RUST_LOG         log filter (default haus=debug,tower_http=info)";
@@ -301,6 +303,11 @@ async fn run() -> anyhow::Result<()> {
     let base_path = dashboard::parse_base_path(std::env::var("HAUS_BASE_PATH").ok().as_deref())
         .map_err(|e| anyhow::anyhow!(e))?;
     dashboard::set_base_path(&base_path);
+    dashboard::load_nav(
+        std::env::var("HAUS_NAV").ok().as_deref(),
+        std::env::var("HAUS_NAV_SELF").ok().as_deref(),
+    )
+    .map_err(|e| anyhow::anyhow!(e))?;
 
     // Create shared application state
     let mut state = AppState::new(storage, device_names, config.clone(), ingest, sources);

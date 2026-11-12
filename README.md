@@ -39,6 +39,7 @@ LORIOT_WS_TOKEN=... BIND=127.0.0.1 PORT=3000 ./haus
 | `LOXONE_MAP`      | (none)                         | JSON `{"<control uuid>/<field>": "<state name or state uuid>"}` for fields other than `Default`; `"-"` retires a series (its history stays, it is not followed live and not reported as unmapped) |
 | `LOXONE_TRACK`    | (none)                         | control UUIDs, comma separated, to follow live without imported history; name, room and kind come from the Miniserver's structure file |
 | `LOXONE_KEY_SHA256` | (trust on first use)         | SHA-256 of the Miniserver's public key; a different key is refused before any login |
+| `HAUS_NAV`, `HAUS_NAV_SELF` | (none) | a home link and app switcher in the page header: a nav v1 JSON file (`{"version": 1, "home": {"name", "url"}, "apps": [{"id", "name", "url", "desc"}]}`, contract as in warte's `warte docs nav`) and haus's own id in it. Set both or neither; a file that fails the contract stops startup |
 | `BIND`            | `HOST`, else `0.0.0.0`         | listen address, e.g. `127.0.0.1` behind a reverse proxy |
 | `PORT`            | `3000`                         | listen port |
 | `HAUS_BASE_PATH`  | (none)                         | path prefix such as `/haus` when a reverse proxy forwards `/haus/*` with the prefix kept (Caddy `handle /haus/*`, not `handle_path`); every route and link moves under it, `/health` also stays at the root |

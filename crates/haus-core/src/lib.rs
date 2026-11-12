@@ -24,6 +24,7 @@ pub mod heatpump;
 pub mod import;
 pub mod ingest;
 pub mod loxone;
+pub mod nav;
 pub mod sensors;
 pub mod storage;
 pub mod store;
