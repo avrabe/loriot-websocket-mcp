@@ -20,6 +20,7 @@ pub mod analytics;
 pub mod energy;
 pub mod heatpump;
 pub mod import;
+pub mod ingest;
 pub mod sensors;
 pub mod storage;
 pub mod store;
@@ -50,6 +51,9 @@ pub enum AppError {
 
     #[error("Serialization error: {0}")]
     Serialization(#[from] serde_json::Error),
+
+    #[error("{0}")]
+    Store(#[from] store::StoreError),
 
     #[error("Network error: {0}")]
     Network(String),

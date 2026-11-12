@@ -1,5 +1,6 @@
 //! Shared application state
 
+use haus_core::ingest::{loriot_items, Ingestor};
 use haus_core::{AppConfig, ConnectionStatus, DiskReader, SensorReading, StorageManager};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
@@ -19,7 +20,7 @@ where
     }
 }
 
-/// Lock-free view of the upstream (Loriot) connection, read by `/health`.
+/// Lock-free view of one source's connection, read by `/health`.
 /// Atomics only, so the health check can never wait on a contended lock.
 #[derive(Debug, Default)]
 pub struct UpstreamHealth {
@@ -50,6 +51,14 @@ impl UpstreamHealth {
     }
 }
 
+/// Connection state of every source (DD-011). A source that is not
+/// configured is `None` and left out of `/health`.
+#[derive(Debug, Default)]
+pub struct Sources {
+    pub loriot: UpstreamHealth,
+    pub loxone: Option<UpstreamHealth>,
+}
+
 /// Shared application state accessible by all handlers
 #[derive(Clone)]
 pub struct AppState {
@@ -65,8 +74,10 @@ pub struct AppState {
     pub status_tx: broadcast::Sender<ConnectionStatus>,
     /// Application configuration
     pub config: AppConfig,
-    /// Upstream connection health (for `/health`)
-    pub upstream: Arc<UpstreamHealth>,
+    /// Connection state per source (for `/health`)
+    pub sources: Arc<Sources>,
+    /// Writes readings into the time-series store
+    pub ingest: Arc<Ingestor>,
 }
 
 impl AppState {
@@ -74,6 +85,8 @@ impl AppState {
         storage: StorageManager,
         device_names: HashMap<String, String>,
         config: AppConfig,
+        ingest: Arc<Ingestor>,
+        sources: Sources,
     ) -> Self {
         let (reading_tx, _) = broadcast::channel(100);
         let (status_tx, _) = broadcast::channel(16);
@@ -85,7 +98,8 @@ impl AppState {
             reading_tx,
             status_tx,
             config,
-            upstream: Arc::new(UpstreamHealth::default()),
+            sources: Arc::new(sources),
+            ingest,
         }
     }
 
@@ -96,8 +110,9 @@ impl AppState {
     }
 
     /// Add a new reading and broadcast to subscribers. The in-memory update
-    /// happens under the storage lock; the file append runs afterwards on a
-    /// blocking thread, with the lock released.
+    /// happens under the storage lock; the file append and the store write
+    /// run afterwards on a blocking thread, with the lock released
+    /// (REQ-STORE-001: no storage IO on the runtime).
     pub async fn add_reading(&self, reading: SensorReading) -> haus_core::Result<bool> {
         let (line, disk) = {
             let mut storage = self.storage.write().await;
@@ -106,7 +121,23 @@ impl AppState {
         let Some(line) = line else {
             return Ok(false);
         };
-        run_blocking(move || disk.append_line(&line)).await?;
+        let name = reading.name.clone().unwrap_or_else(|| reading.eui.clone());
+        let items = loriot_items(&reading, &name);
+        let ingest = self.ingest.clone();
+        let persisted = run_blocking(move || -> haus_core::Result<()> {
+            disk.append_line(&line)?;
+            ingest.ingest(&items)?;
+            Ok(())
+        })
+        .await;
+        if let Err(e) = persisted {
+            // Not persisted: forget it, so a redelivery is stored, not dropped.
+            self.storage
+                .write()
+                .await
+                .forget_reading(&reading.eui, reading.ts);
+            return Err(e);
+        }
         let _ = self.reading_tx.send(reading);
         Ok(true)
     }
@@ -123,26 +154,48 @@ impl AppState {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
+    use haus_core::store::{Source, Store};
     use haus_core::StorageConfig;
+
+    /// A state on temporary files, for tests.
+    pub fn test_state(name: &str, config: AppConfig) -> AppState {
+        let base = std::env::temp_dir().join(format!(
+            "haus-state-{name}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&base).unwrap();
+        let storage = StorageManager::new(StorageConfig {
+            file_path: base.join("h.jsonl").to_string_lossy().into_owned(),
+            ..Default::default()
+        });
+        let store = Arc::new(Store::open(base.join("s.redb")).unwrap());
+        AppState::new(
+            storage,
+            HashMap::new(),
+            config,
+            Arc::new(Ingestor::new(store)),
+            Sources::default(),
+        )
+    }
 
     fn reading(ts: u64) -> SensorReading {
         serde_json::from_str(&format!(
-            r#"{{"cmd":"rx","eui":"E1","data":"00","ts":{ts},"name":null}}"#
+            r#"{{"cmd":"rx","eui":"E1","data":"00","ts":{ts},"name":null,"parsed_temperature":21.5}}"#
         ))
         .unwrap()
     }
 
+    // rivet: partially-verifies REQ-STORE-001
     #[tokio::test]
     async fn add_reading_persists_once_and_dedupes() {
-        let path = std::env::temp_dir().join(format!("loriot-state-{}.jsonl", std::process::id()));
-        let _ = std::fs::remove_file(&path);
-        let storage = StorageManager::new(StorageConfig {
-            file_path: path.to_string_lossy().into_owned(),
-            ..Default::default()
-        });
-        let state = AppState::new(storage, HashMap::new(), AppConfig::default());
+        let state = test_state("add", AppConfig::default());
+        let path = std::path::PathBuf::from(state.storage.read().await.disk().path());
         let mut rx = state.reading_tx.subscribe();
 
         assert!(state.add_reading(reading(1)).await.unwrap());
@@ -154,6 +207,46 @@ mod tests {
         assert_eq!(state.storage.read().await.reading_count(), 2);
         assert_eq!(rx.recv().await.unwrap().ts, 1);
         assert_eq!(rx.recv().await.unwrap().ts, 2);
-        let _ = std::fs::remove_file(&path);
+
+        // The store has the readings too, one series per decoded field.
+        let store = state.ingest.store().clone();
+        let id = store
+            .series_id(&haus_core::store::SeriesKey::new(
+                Source::Loriot,
+                "E1",
+                "temperature",
+            ))
+            .unwrap()
+            .expect("temperature series");
+        assert_eq!(store.range(id, 0, 10).unwrap(), vec![(1, 21.5), (2, 21.5)]);
+    }
+
+    #[tokio::test]
+    async fn a_reading_that_failed_to_persist_is_stored_on_redelivery() {
+        let state = test_state("redeliver", AppConfig::default());
+        // Point the history file into a directory that does not exist yet.
+        let dir = std::env::temp_dir().join(format!(
+            "haus-redeliver-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let file = dir.join("h.jsonl");
+        {
+            let mut storage = state.storage.write().await;
+            *storage = StorageManager::new(StorageConfig {
+                file_path: file.to_string_lossy().into_owned(),
+                ..Default::default()
+            });
+        }
+        assert!(state.add_reading(reading(7)).await.is_err());
+        assert_eq!(state.storage.read().await.reading_count(), 0);
+
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(state.add_reading(reading(7)).await.unwrap());
+        assert_eq!(std::fs::read_to_string(&file).unwrap().lines().count(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

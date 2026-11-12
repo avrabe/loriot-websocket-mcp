@@ -275,7 +275,7 @@ mod tests {
         let record = WeatherRecord {
             station_id: "05717".to_string(),
             station_name: "Teststation".to_string(),
-            station_coordinates: Coordinates::new(51.4, 7.2),
+            station_coordinates: Coordinates::new(50.11, 8.68),
             distance_km: 5.0,
             weather: DailyWeather {
                 date: "20241201".to_string(),

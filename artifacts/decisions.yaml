@@ -58,7 +58,7 @@ artifacts:
   - id: DD-003
     type: design-decision
     title: redb as the time-series store
-    status: approved
+    status: implemented
     description: >
       One embedded redb file holds every series, keyed by series id and timestamp.
     release: v0.4.0
@@ -249,7 +249,7 @@ artifacts:
   - id: DD-011
     type: design-decision
     title: Keep the 0.3.0 LORIOT client and generalise its health state
-    status: approved
+    status: implemented
     release: v0.4.0
     description: >
       The LORIOT websocket client stays as it is; its connection state becomes

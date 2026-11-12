@@ -19,6 +19,7 @@ use tracing::Level;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 pub use state::AppState;
+use state::{Sources, UpstreamHealth};
 
 const USAGE: &str = "\
 Usage: haus [--help | --version]
@@ -28,6 +29,7 @@ Keeps home climate readings (LoRaWAN via LORIOT) and serves them over HTTP.
 
 Environment:
   LORIOT_WS_TOKEN  LORIOT application token (required to run)
+  HAUS_STORE       time-series store file (default haus.redb)
   BIND             listen address (falls back to HOST, default 0.0.0.0)
   PORT             listen port (default 3000)
   RUST_LOG         log filter (default haus=debug,tower_http=info)";
@@ -102,19 +104,32 @@ fn with_http_layers(app: Router, health: Router) -> Router {
     )
 }
 
+/// One source's entry in `/health`.
+fn source_health(h: &UpstreamHealth) -> serde_json::Value {
+    let last = h.last_message();
+    serde_json::json!({
+        "connected": h.connected(),
+        "last_message_at": last.map(|t| t.to_rfc3339()),
+        "last_message_age_secs": last.map(|t| (chrono::Utc::now() - t).num_seconds().max(0)),
+    })
+}
+
 /// GET /health - liveness of the process and runtime. Always 200 while the
-/// runtime can answer; the upstream state is informational only (a watchdog
-/// must not restart the service just because LORIOT is unreachable).
+/// runtime can answer; the source states are informational only (a watchdog
+/// must not restart the service just because a source is unreachable).
+/// `sources` has one entry per configured source (REQ-HEALTH-001);
+/// `upstream` repeats `sources.loriot` for watchdogs written against 0.3.0.
 async fn health(State(state): State<AppState>) -> Json<serde_json::Value> {
-    let last = state.upstream.last_message();
+    let mut sources = serde_json::Map::new();
+    sources.insert("loriot".into(), source_health(&state.sources.loriot));
+    if let Some(lox) = &state.sources.loxone {
+        sources.insert("loxone".into(), source_health(lox));
+    }
     Json(serde_json::json!({
         "status": "ok",
         "version": env!("CARGO_PKG_VERSION"),
-        "upstream": {
-            "connected": state.upstream.connected(),
-            "last_message_at": last.map(|t| t.to_rfc3339()),
-            "last_message_age_secs": last.map(|t| (chrono::Utc::now() - t).num_seconds().max(0)),
-        },
+        "sources": sources,
+        "upstream": source_health(&state.sources.loriot),
     }))
 }
 
@@ -193,8 +208,28 @@ async fn run() -> anyhow::Result<()> {
         .map(|f| load_device_names(f))
         .unwrap_or_default();
 
+    // The time-series store (DD-003); opening may recover a file, so off the runtime.
+    let store_path = std::env::var("HAUS_STORE")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "haus.redb".to_string());
+    let store = {
+        let p = store_path.clone();
+        state::run_blocking(move || haus_core::store::Store::open(p))
+            .await
+            .map_err(|e| anyhow::anyhow!("{store_path}: {e}"))?
+    };
+    tracing::info!("Store {store_path}: {} series", store.series()?.len());
+    let ingest = std::sync::Arc::new(haus_core::ingest::Ingestor::new(std::sync::Arc::new(store)));
+
     // Create shared application state
-    let state = AppState::new(storage, device_names, config.clone());
+    let state = AppState::new(
+        storage,
+        device_names,
+        config.clone(),
+        ingest,
+        Sources::default(),
+    );
 
     // Build main API router
     let app = Router::new()
@@ -239,8 +274,6 @@ async fn run() -> anyhow::Result<()> {
 mod tests {
     use super::*;
     use axum::http::StatusCode;
-    use haus_core::{StorageConfig, StorageManager};
-    use std::collections::HashMap;
 
     fn args(a: &[&str]) -> Vec<String> {
         a.iter().map(|s| s.to_string()).collect()
@@ -253,6 +286,8 @@ mod tests {
             code: 0,
             stdout: format!("haus {}", env!("CARGO_PKG_VERSION")),
         };
+        assert_eq!(env!("CARGO_PKG_NAME"), "haus");
+        assert_eq!(env!("CARGO_BIN_NAME"), "haus");
         assert_eq!(parse_args(args(&["--version"])), want);
         assert_eq!(parse_args(args(&["-V"])), want);
     }
@@ -339,28 +374,34 @@ mod tests {
         assert!(!log.contains("/health"), "/health was logged:\n{log}");
     }
 
+    // rivet: verifies REQ-HEALTH-001
     #[tokio::test]
-    async fn health_is_ok_and_reports_upstream_state() {
-        let storage = StorageManager::new(StorageConfig {
-            file_path: std::env::temp_dir()
-                .join(format!("loriot-health-{}.jsonl", std::process::id()))
-                .to_string_lossy()
-                .into_owned(),
-            ..Default::default()
-        });
-        let state = AppState::new(storage, HashMap::new(), AppConfig::default());
+    async fn health_is_ok_and_reports_every_source() {
+        let state = crate::state::tests::test_state("health", AppConfig::default());
 
-        // Upstream down and never seen: still "ok".
+        // Source down and never seen: still "ok". No Loxone configured: absent.
         let Json(body) = health(State(state.clone())).await;
         assert_eq!(body["status"], "ok");
-        assert_eq!(body["upstream"]["connected"], false);
-        assert!(body["upstream"]["last_message_at"].is_null());
+        assert_eq!(body["sources"]["loriot"]["connected"], false);
+        assert!(body["sources"]["loriot"]["last_message_at"].is_null());
+        assert!(body["sources"].get("loxone").is_none());
+        assert_eq!(body["upstream"], body["sources"]["loriot"]);
 
-        state.upstream.set_connected(true);
-        state.upstream.record_message();
+        state.sources.loriot.set_connected(true);
+        state.sources.loriot.record_message();
         let Json(body) = health(State(state)).await;
-        assert_eq!(body["upstream"]["connected"], true);
-        assert!(body["upstream"]["last_message_at"].is_string());
-        assert_eq!(body["upstream"]["last_message_age_secs"], 0);
+        assert_eq!(body["sources"]["loriot"]["connected"], true);
+        assert!(body["sources"]["loriot"]["last_message_at"].is_string());
+        assert_eq!(body["sources"]["loriot"]["last_message_age_secs"], 0);
+        assert_eq!(body["upstream"], body["sources"]["loriot"]);
+
+        // A configured Loxone source shows up next to it.
+        let mut with_lox = crate::state::tests::test_state("health-lox", AppConfig::default());
+        with_lox.sources = std::sync::Arc::new(Sources {
+            loriot: UpstreamHealth::default(),
+            loxone: Some(UpstreamHealth::default()),
+        });
+        let Json(body) = health(State(with_lox)).await;
+        assert_eq!(body["sources"]["loxone"]["connected"], false);
     }
 }
