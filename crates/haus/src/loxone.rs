@@ -433,7 +433,59 @@ fn wanted_series(state: &AppState) -> Result<HashMap<(String, String), SeriesMet
         .collect())
 }
 
+/// The HTTP(S) base of the Miniserver behind a `ws://` / `wss://` URL.
+fn http_base(ws_url: &str) -> Result<String, BoxError> {
+    let u = ws_url.trim_end_matches('/');
+    if let Some(rest) = u.strip_prefix("wss://") {
+        Ok(format!("https://{rest}"))
+    } else if let Some(rest) = u.strip_prefix("ws://") {
+        Ok(format!("http://{rest}"))
+    } else {
+        Err(format!("LOXONE_URL must start with ws:// or wss://, got {u:?}").into())
+    }
+}
+
+/// The Miniserver's public key, over HTTP(S). The websocket does not serve
+/// `jdev/sys/getPublicKey` (a real Miniserver, 17.2, answers 400 there); V17.0
+/// gets the key before the websocket is opened.
+async fn fetch_public_key(cfg: &LoxoneConfig) -> Result<String, BoxError> {
+    let url = format!("{}/{}", http_base(&cfg.url)?, Cmd::GetPublicKey.text());
+    tracing::debug!("loxone -> {} (http)", Cmd::GetPublicKey.name());
+    let client = reqwest::Client::builder()
+        .timeout(cfg.request_timeout)
+        .build()?;
+    let body = client
+        .get(&url)
+        .send()
+        .await?
+        .error_for_status()?
+        .text()
+        .await?;
+    let r = Response::parse(&body)?;
+    if r.code != 200 {
+        return Err(format!("getPublicKey answered {}", r.code).into());
+    }
+    Ok(r.value.as_str().ok_or("getPublicKey: no key")?.to_string())
+}
+
 async fn session(state: &AppState, cfg: &LoxoneConfig) -> Result<(), BoxError> {
+    // The public key first, over HTTP, and refuse a Miniserver whose key is
+    // not the pinned or remembered one before anything derived from the
+    // credentials is sent (a host on the path could otherwise read the
+    // session and relay or attack the login).
+    let pem = fetch_public_key(cfg).await?;
+    let key_sha256 = public_key_sha256(&pem)?;
+    if let Some(want) = expected_key(cfg) {
+        if want != key_sha256 {
+            return Err(format!(
+                "the Miniserver presented public key sha256 {key_sha256}, expected {want}; \
+                 refusing to authenticate (set LOXONE_KEY_SHA256 or remove the token file \
+                 if the Miniserver's key really changed)"
+            )
+            .into());
+        }
+    }
+
     let url = format!("{}/ws/rfc6455", cfg.url.trim_end_matches('/'));
     let mut req = url.as_str().into_client_request()?;
     req.headers_mut()
@@ -451,26 +503,6 @@ async fn session(state: &AppState, cfg: &LoxoneConfig) -> Result<(), BoxError> {
     };
 
     // Key exchange, then authentication.
-    let pem = c.request(&Cmd::GetPublicKey, None).await?;
-    let pem = pem
-        .value
-        .as_str()
-        .ok_or("getPublicKey: no key")?
-        .to_string();
-    // Refuse a Miniserver whose key is not the pinned or remembered one
-    // before anything derived from the credentials is sent (a host on the
-    // path could otherwise read the session and relay or attack the login).
-    let key_sha256 = public_key_sha256(&pem)?;
-    if let Some(want) = expected_key(cfg) {
-        if want != key_sha256 {
-            return Err(format!(
-                "the Miniserver presented public key sha256 {key_sha256}, expected {want}; \
-                 refusing to authenticate (set LOXONE_KEY_SHA256 or remove the token file \
-                 if the Miniserver's key really changed)"
-            )
-            .into());
-        }
-    }
     let sess = Session::random();
     c.request(&Cmd::KeyExchange(sess.encrypted_key(&pem)?), None)
         .await?;
@@ -674,6 +706,15 @@ mod tests {
                 *fake.accepts.lock().unwrap() += 1;
                 let fake = fake.clone();
                 tokio::spawn(async move {
+                    // Same port, like the Miniserver: a websocket upgrade, or
+                    // a plain HTTP request (the public key).
+                    let mut head = [0u8; 2048];
+                    let n = tcp.peek(&mut head).await.unwrap_or(0);
+                    let head = String::from_utf8_lossy(&head[..n]).to_lowercase();
+                    if !head.contains("upgrade: websocket") {
+                        http(&fake, tcp).await;
+                        return;
+                    }
                     // The Err type is fixed by tungstenite's callback signature.
                     #[allow(clippy::result_large_err)]
                     let cb = |req: &Request, mut resp: WsResponse| {
@@ -694,6 +735,34 @@ mod tests {
             }
         });
         format!("ws://{addr}")
+    }
+
+    /// One plain HTTP request: GET /jdev/sys/getPublicKey, else 404.
+    async fn http(fake: &Fake, mut tcp: TcpStream) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let mut buf = vec![0u8; 4096];
+        let n = tcp.read(&mut buf).await.unwrap_or(0);
+        let req = String::from_utf8_lossy(&buf[..n]).to_string();
+        let path = req.split_whitespace().nth(1).unwrap_or("").to_string();
+        fake.received
+            .lock()
+            .unwrap()
+            .push(format!("http:{}", path.trim_start_matches('/')));
+        let (status, body) = if path == "/jdev/sys/getPublicKey" {
+            (
+                "200 OK",
+                json!({"LL": {"control": "dev/sys/getPublicKey", "value": fake.pem, "Code": "200"}})
+                    .to_string(),
+            )
+        } else {
+            ("404 Not Found", String::new())
+        };
+        let resp = format!(
+            "HTTP/1.1 {status}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        let _ = tcp.write_all(resp.as_bytes()).await;
+        let _ = tcp.shutdown().await;
     }
 
     async fn connection(fake: &Fake, ws: &mut ServerWs) {
@@ -729,7 +798,8 @@ mod tests {
             };
             let expect_hash = |msg: &str| hmac_hex(HashAlg::Sha256, KEY_HEX, msg).unwrap();
             match parts.as_slice() {
-                ["jdev", "sys", "getPublicKey"] => reply(ws, &cmd, 200, json!(fake.pem)).await,
+                // A real Miniserver (17.2) does not serve the key here.
+                ["jdev", "sys", "getPublicKey"] => reply(ws, &cmd, 400, json!("")).await,
                 ["jdev", "sys", "keyexchange", b64] => {
                     let c = base64::engine::general_purpose::STANDARD
                         .decode(b64)
@@ -967,7 +1037,10 @@ mod tests {
 
         let received = fake.received();
         // Only allow-listed commands; token commands only encrypted.
-        for c in &received {
+        // The public key comes over HTTP, everything else over the websocket.
+        assert!(received.iter().any(|c| c == "http:jdev/sys/getPublicKey"));
+        assert!(!received.iter().any(|c| c == "jdev/sys/getPublicKey"));
+        for c in received.iter().filter(|c| !c.starts_with("http:")) {
             let plain = c.strip_prefix("enc:").unwrap_or(c);
             assert!(
                 ALLOWED_COMMANDS.iter().any(|a| plain.starts_with(a)),
@@ -1076,7 +1149,9 @@ mod tests {
         wait_for("two attempts at B", || *b.accepts.lock().unwrap() >= 2).await;
         task.abort();
         assert!(
-            b.received().iter().all(|c| c == "jdev/sys/getPublicKey"),
+            b.received()
+                .iter()
+                .all(|c| c == "http:jdev/sys/getPublicKey"),
             "sent more than getPublicKey to an unknown key: {:?}",
             b.received()
         );
@@ -1091,7 +1166,10 @@ mod tests {
         wait_for("an attempt", || b.received().len() > before).await;
         sleep(Duration::from_millis(200)).await;
         task.abort();
-        assert!(b.received().iter().all(|c| c == "jdev/sys/getPublicKey"));
+        assert!(b
+            .received()
+            .iter()
+            .all(|c| c == "http:jdev/sys/getPublicKey"));
         assert!(!fresh.exists());
         let _ = std::fs::remove_file(&token_file);
     }
@@ -1137,6 +1215,17 @@ mod tests {
         assert_eq!(backoff_delay(&c, u32::MAX), Duration::from_secs(300));
         assert_eq!(c.keepalive, Duration::from_secs(60));
         assert!(c.silence > c.keepalive * 2 && c.silence < Duration::from_secs(300));
+    }
+
+    #[test]
+    fn the_public_key_url_follows_the_websocket_url() {
+        assert_eq!(http_base("ws://192.0.2.7").unwrap(), "http://192.0.2.7");
+        assert_eq!(http_base("ws://host:8080/").unwrap(), "http://host:8080");
+        assert_eq!(
+            http_base("wss://ms.example:443").unwrap(),
+            "https://ms.example:443"
+        );
+        assert!(http_base("http://host").is_err());
     }
 
     #[test]

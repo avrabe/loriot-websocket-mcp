@@ -102,8 +102,10 @@ artifacts:
     fields:
       decision: >
         haus speaks the Miniserver websocket protocol itself, after Loxone's
-        "Communicating with the Loxone Miniserver" V17.0 (31.3.2026): RSA key
-        exchange and an AES-256-CBC session, token authentication (getkey2,
+        "Communicating with the Loxone Miniserver" V17.0 (31.3.2026): the
+        public key fetched over HTTP(S) before the websocket is opened (a real
+        Miniserver, 17.2, answers getPublicKey with 400 on the websocket), RSA
+        key exchange and an AES-256-CBC session, token authentication (getkey2,
         getjwt with permission 4, authwithtoken, refreshjwt) with the token
         kept in a 0600 file, the structure file, enablebinstatusupdate, and
         value-event tables keyed by UUID. Token commands are always sent

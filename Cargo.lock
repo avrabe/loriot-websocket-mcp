@@ -523,6 +523,7 @@ dependencies = [
  "haus-core",
  "hex",
  "rand 0.8.8",
+ "reqwest",
  "rsa",
  "rustls",
  "serde",
