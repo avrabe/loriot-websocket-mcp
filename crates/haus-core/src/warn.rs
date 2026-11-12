@@ -276,42 +276,55 @@ pub fn evaluate(
         // Per-series rules.
         for s in ss {
             let Some((ts, v)) = s.latest else { continue };
-            match s.meta.quantity {
-                Quantity::BatteryVoltage => {
-                    let (low, unit) = if s.meta.unit == "%" {
-                        (d.battery_pct, "%")
-                    } else {
-                        (d.battery_v, " V")
-                    };
-                    if v < low {
-                        out.push(Warning {
-                            kind: Kind::BatteryLow,
-                            room: room.to_string(),
-                            series: vec![s.id],
-                            message: format!(
-                                "battery {} at {v:.2}{unit} (below {low}{unit})",
-                                s.meta.name
-                            ),
-                            since_ms: Some(ts),
-                        });
-                    }
-                }
-                _ if s.meta.key.source == Source::Loriot
-                    && (now_ms - ts) as f64 > d.silent_minutes * 60_000.0 =>
-                {
+            if s.meta.quantity == Quantity::BatteryVoltage {
+                let (low, unit) = if s.meta.unit == "%" {
+                    (d.battery_pct, "%")
+                } else {
+                    (d.battery_v, " V")
+                };
+                if v < low {
                     out.push(Warning {
-                        kind: Kind::SensorSilent,
+                        kind: Kind::BatteryLow,
                         room: room.to_string(),
                         series: vec![s.id],
                         message: format!(
-                            "{} sent nothing for {} min",
-                            s.meta.name,
-                            (now_ms - ts) / 60_000
+                            "battery {} at {v:.2}{unit} (below {low}{unit})",
+                            s.meta.name
                         ),
                         since_ms: Some(ts),
                     });
                 }
-                _ => {}
+            }
+        }
+        // Silence is a device's, not a series': one warning per LoRaWAN
+        // device (EUI) whose newest value of any series is too old, listing
+        // all of its series.
+        let mut devices: BTreeMap<&str, Vec<&SeriesData>> = BTreeMap::new();
+        for s in all.iter().filter(|s| s.meta.key.source == Source::Loriot) {
+            devices
+                .entry(s.meta.key.source_id.as_str())
+                .or_default()
+                .push(s);
+        }
+        for dev in devices.values() {
+            let Some(ts) = dev.iter().filter_map(|s| s.latest.map(|(t, _)| t)).max() else {
+                continue;
+            };
+            if (now_ms - ts) as f64 > d.silent_minutes * 60_000.0 {
+                let name = dev
+                    .iter()
+                    .find(|s| s.meta.quantity != Quantity::BatteryVoltage)
+                    .unwrap_or(&dev[0])
+                    .meta
+                    .name
+                    .clone();
+                out.push(Warning {
+                    kind: Kind::SensorSilent,
+                    room: room.to_string(),
+                    series: dev.iter().map(|s| s.id).collect(),
+                    message: format!("{name} sent nothing for {} min", (now_ms - ts) / 60_000),
+                    since_ms: Some(ts),
+                });
             }
         }
         if rs.outdoor {
@@ -593,6 +606,30 @@ mod tests {
             kinds(&evaluate(&frost, &[(Source::Loriot, true)], NOW, &c2)),
             vec![(Kind::Frost, "Cellar".into())]
         );
+        // A frost room never gets too_cold or too_warm, but mould still counts.
+        let hot_cellar = vec![s(
+            1,
+            Source::Loriot,
+            Quantity::Temperature,
+            "T",
+            "Cellar",
+            "°C",
+            &[(NOW - 60_000, 30.0)],
+        )];
+        assert!(evaluate(&hot_cellar, &[(Source::Loriot, true)], NOW, &c2).is_empty());
+        let damp_cellar = vec![s(
+            2,
+            Source::Loriot,
+            Quantity::Humidity,
+            "RH",
+            "Cellar",
+            "%",
+            &[(NOW - 5 * H, 70.0), (NOW - 60_000, 70.0)],
+        )];
+        assert_eq!(
+            kinds(&evaluate(&damp_cellar, &[(Source::Loriot, true)], NOW, &c2)),
+            vec![(Kind::MouldRisk, "Cellar".into())]
+        );
         // Per-room comfort override.
         let mut c3 = cfg.clone();
         c3.rooms.insert(
@@ -666,6 +703,11 @@ mod tests {
         );
         let k = kinds(&w);
         assert!(k.contains(&(Kind::SensorSilent, "Cellar".into())), "{k:?}");
+        assert_eq!(
+            w.iter().filter(|w| w.kind == Kind::SensorSilent).count(),
+            1,
+            "{w:?}"
+        );
         assert!(!k
             .iter()
             .any(|(k, r)| *k == Kind::SensorSilent && r == "Office"));
@@ -860,5 +902,47 @@ mod tests {
             &[(NOW - 10 * D, 0.0)],
         );
         assert!(evaluate(&[lora, valve], &up, NOW, &cfg).is_empty());
+    }
+
+    // rivet: verifies REQ-WARN-004
+    #[test]
+    fn a_silent_device_gives_one_warning_with_all_its_series() {
+        let cfg = WarnConfig::default();
+        let up = [(Source::Loriot, true)];
+        let dev = |id: u32, eui: &str, q, name: &str, age: i64| {
+            let mut x = s(
+                id,
+                Source::Loriot,
+                q,
+                name,
+                "Cellar",
+                "",
+                &[(NOW - age, 1.0)],
+            );
+            x.meta.key = SeriesKey::new(Source::Loriot, eui, format!("f{id}"));
+            x
+        };
+        let m = 60_000;
+        let data = vec![
+            dev(10, "EUI-A", Quantity::Temperature, "Cellar sensor", 62 * m),
+            dev(11, "EUI-A", Quantity::Humidity, "Cellar sensor", 62 * m),
+            dev(
+                12,
+                "EUI-A",
+                Quantity::BatteryVoltage,
+                "Cellar sensor",
+                62 * m,
+            ),
+            // Another device in the same room, one series fresh: not silent.
+            dev(20, "EUI-B", Quantity::Temperature, "Other", 90 * m),
+            dev(21, "EUI-B", Quantity::Humidity, "Other", 5 * m),
+        ];
+        let silent: Vec<Warning> = evaluate(&data, &up, NOW, &cfg)
+            .into_iter()
+            .filter(|w| w.kind == Kind::SensorSilent)
+            .collect();
+        assert_eq!(silent.len(), 1, "{silent:?}");
+        assert_eq!(silent[0].series, vec![10, 11, 12]);
+        assert_eq!(silent[0].message, "Cellar sensor sent nothing for 62 min");
     }
 }

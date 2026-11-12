@@ -545,7 +545,8 @@ artifacts:
     description: >
       A LoRaWAN sensor without a value for longer than the silence threshold
       (default 60 min), a source that is not connected, and a battery voltage
-      below the threshold (default 2.6 V) each get a warning.
+      below the threshold (default 2.6 V) each get a warning. A silent sensor
+      gets one warning naming all of its series, not one per series.
     fields:
       priority: must
       category: functional
