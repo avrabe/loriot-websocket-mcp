@@ -119,7 +119,8 @@ haus import stats4lox <fresh export>     # afterwards: fills the history up to t
 ```
 
 `compare` checks every Stats4Lox sample since `--since` against the value
-haus had at that time. It exits 1 on any difference, on any sample haus has
+haus had at that time, using only points haus received live (imported
+points are kept apart and never count as evidence). It exits 1 on any difference, on any sample haus has
 no value for, and on any series haus does not have.
 
 ### Health check

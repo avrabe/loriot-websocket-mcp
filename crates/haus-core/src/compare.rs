@@ -44,6 +44,9 @@ pub struct SeriesComparison {
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct CompareReport {
     pub series: Vec<SeriesComparison>,
+    /// Series of the export with no sample since `since`: nothing to check.
+    pub not_compared: Vec<String>,
+    /// Measurements the reader leaves out (telegraf internals, no uuid).
     pub skipped: Vec<String>,
     pub problems: Vec<String>,
 }
@@ -91,6 +94,10 @@ pub fn compare_stats4lox(
                 .map(|(&t, &v)| (t, v))
                 .collect();
             if samples.is_empty() {
+                report.not_compared.push(format!(
+                    "{measurement} ({}/{}): no sample since the given time",
+                    key.source_id, key.field
+                ));
                 continue;
             }
             let mut c = SeriesComparison {
@@ -112,7 +119,8 @@ pub fn compare_stats4lox(
             };
             let first = samples[0].0;
             let last = samples[samples.len() - 1].0;
-            let have = store.range(id, first - opts.skew_ms - hold, last + opts.skew_ms)?;
+            // Only what haus received live: imported points would match themselves.
+            let have = store.range_live(id, first - opts.skew_ms - hold, last + opts.skew_ms)?;
             for (t, v) in samples {
                 // The value at t - skew, and every value haus took up to t + skew.
                 let mut candidates: Vec<f64> = standing(&have, t - opts.skew_ms, hold)
@@ -225,8 +233,40 @@ mod tests {
                 value,
             })
             .collect();
-        store.write(&pts).unwrap();
+        store.write_live(&pts).unwrap();
         store
+    }
+
+    // rivet: verifies REQ-RETIRE-001
+    #[test]
+    fn imported_points_are_not_evidence() {
+        // The store holds the logger's own points (an import), nothing live.
+        let d = tmp();
+        let store = Store::open(d.join("s.redb")).unwrap();
+        let id = store
+            .ensure_series(&SeriesMeta {
+                key: SeriesKey::new(Source::Loxone, "u", "Default"),
+                quantity: Quantity::Temperature,
+                unit: "°C".into(),
+                name: "Test".into(),
+                room: None,
+            })
+            .unwrap();
+        let samples = [(T0, 20.0), (T0 + 5 * MIN, 20.0)];
+        let pts: Vec<Point> = samples
+            .iter()
+            .map(|&(ts_ms, value)| Point {
+                series: id,
+                ts_ms,
+                value,
+            })
+            .collect();
+        store.write(&pts).unwrap();
+        export(&d, "u", &samples);
+        let r = compare_stats4lox(&store, &d, opts()).unwrap();
+        assert!(!r.ok(), "imported points matched themselves: {r:?}");
+        assert_eq!(r.series[0].no_value, 2);
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     // rivet: verifies REQ-RETIRE-001
@@ -302,6 +342,7 @@ mod tests {
             .problems
             .iter()
             .any(|p| p.contains("nothing was compared")));
+        assert_eq!(r.not_compared.len(), 1);
         let _ = std::fs::remove_dir_all(&d);
     }
 

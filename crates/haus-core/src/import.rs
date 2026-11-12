@@ -930,6 +930,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
+    // rivet: partially-verifies REQ-MODEL-001
     #[test]
     fn loxone_quantities_from_category_and_name() {
         assert_eq!(loxone_quantity("Temperatur", "x").0, Quantity::Temperature);

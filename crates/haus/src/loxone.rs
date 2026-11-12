@@ -165,6 +165,15 @@ fn new_client_uuid() -> String {
     LoxUuid(b).to_string()
 }
 
+/// Delay before reconnect attempt `attempt` (1-based), before jitter:
+/// base * 2^(attempt-1), capped at the maximum.
+fn backoff_delay(cfg: &LoxoneConfig, attempt: u32) -> Duration {
+    let exp = attempt.saturating_sub(1).min(16);
+    cfg.backoff_base
+        .saturating_mul(1u32 << exp)
+        .min(cfg.backoff_max)
+}
+
 /// Run the source forever: connect, read events, reconnect with backoff.
 pub async fn run_loxone_connection(state: AppState, cfg: LoxoneConfig) {
     let health = state
@@ -189,11 +198,7 @@ pub async fn run_loxone_connection(state: AppState, cfg: LoxoneConfig) {
             Err(e) => tracing::warn!("Loxone connection failed: {e}"),
         }
         health.set_connected(false);
-        let exp = attempt.saturating_sub(1).min(16);
-        let delay = cfg
-            .backoff_base
-            .saturating_mul(1u32 << exp)
-            .min(cfg.backoff_max);
+        let delay = backoff_delay(&cfg, attempt);
         let jitter = Duration::from_millis(fastrand::u64(0..=(delay.as_millis() as u64 / 4)));
         sleep(delay + jitter).await;
     }
@@ -210,6 +215,9 @@ struct Conn<'a> {
     /// When the last frame arrived: the silence deadline counts from here,
     /// whatever else the loop does in between.
     last_rx: tokio::time::Instant,
+    /// Until status updates are on, every request must finish by then, so a
+    /// peer trickling frames cannot hold the setup open forever.
+    setup_deadline: Option<tokio::time::Instant>,
 }
 
 /// A complete message: its header and the payload that followed it.
@@ -241,9 +249,13 @@ impl Conn<'_> {
                 .await
                 .map_err(|_| format!("no frame from the Miniserver for {wait:?}"))?
                 .ok_or("connection closed")??;
-            self.last_rx = tokio::time::Instant::now();
-            if let Some(h) = self.state.sources.loxone.as_ref() {
-                h.record_message();
+            // Only protocol frames are signs of life: a peer that answers
+            // websocket pings but sends nothing else is as good as dead.
+            if matches!(frame, Message::Binary(_) | Message::Text(_)) {
+                self.last_rx = tokio::time::Instant::now();
+                if let Some(h) = self.state.sources.loxone.as_ref() {
+                    h.record_message();
+                }
             }
             match (frame, self.pending.take()) {
                 (Message::Binary(b), None) => {
@@ -273,7 +285,14 @@ impl Conn<'_> {
     ) -> Result<String, BoxError> {
         self.send(cmd, session).await?;
         loop {
-            match self.next(self.cfg.request_timeout).await? {
+            let wait = match self.setup_deadline {
+                Some(d) => d
+                    .checked_duration_since(tokio::time::Instant::now())
+                    .ok_or("the Miniserver setup took too long")?
+                    .min(self.cfg.request_timeout),
+                None => self.cfg.request_timeout,
+            };
+            match self.next(wait).await? {
                 Msg::Text(t) => return Ok(t),
                 Msg::Keepalive | Msg::Binary(..) => {}
             }
@@ -428,6 +447,7 @@ async fn session(state: &AppState, cfg: &LoxoneConfig) -> Result<(), BoxError> {
         state,
         pending: None,
         last_rx: tokio::time::Instant::now(),
+        setup_deadline: Some(tokio::time::Instant::now() + cfg.request_timeout * 6),
     };
 
     // Key exchange, then authentication.
@@ -478,6 +498,7 @@ async fn session(state: &AppState, cfg: &LoxoneConfig) -> Result<(), BoxError> {
     }
 
     c.request(&Cmd::EnableStatusUpdates, None).await?;
+    c.setup_deadline = None;
     if let Some(h) = state.sources.loxone.as_ref() {
         h.set_connected(true);
     }
@@ -504,7 +525,13 @@ async fn session(state: &AppState, cfg: &LoxoneConfig) -> Result<(), BoxError> {
                         .collect();
                     if !items.is_empty() {
                         let ingest = state.ingest.clone();
-                        run_blocking(move || ingest.ingest(&items)).await?;
+                        // A wedged store must not stop keepalives and silence
+                        // detection for long; the time spent storing is not
+                        // silence from the Miniserver.
+                        timeout(cfg.silence, run_blocking(move || ingest.ingest(&items)))
+                            .await
+                            .map_err(|_| "storing Loxone events timed out")??;
+                        c.last_rx = tokio::time::Instant::now();
                     }
                 }
                 Msg::Text(t) => {
@@ -565,9 +592,14 @@ mod tests {
         Drop,
         /// Stop answering anything (a wedged peer).
         Silent,
+        /// Answer only with websocket pings: alive at the transport, dead in
+        /// the protocol.
+        PingOnly,
     }
 
     struct Fake {
+        /// How long issued tokens are valid, in seconds.
+        token_valid_s: Mutex<i64>,
         rsa: rsa::RsaPrivateKey,
         pem: String,
         token: Mutex<String>,
@@ -593,6 +625,7 @@ mod tests {
                 .replace("-----END PUBLIC KEY-----", "-----END CERTIFICATE-----")
                 .replace('\n', "");
             Arc::new(Self {
+                token_valid_s: Mutex::new(30 * 86_400),
                 rsa,
                 pem,
                 token: Mutex::new("tok-1".into()),
@@ -666,6 +699,7 @@ mod tests {
     async fn connection(fake: &Fake, ws: &mut ServerWs) {
         let mut session: Option<([u8; 32], [u8; 16])> = None;
         let mut silent = false;
+        let mut ping_only = false;
         while let Some(Ok(msg)) = ws.next().await {
             let Message::Text(t) = msg else { continue };
             let raw = t.as_str().to_string();
@@ -682,6 +716,10 @@ mod tests {
                 .unwrap()
                 .push(format!("{}{cmd}", if encrypted { "enc:" } else { "" }));
             if silent {
+                continue;
+            }
+            if ping_only {
+                ws.send(Message::Ping(vec![1u8].into())).await.unwrap();
                 continue;
             }
             // The base64 key may contain '/': the argument is the whole rest.
@@ -723,7 +761,7 @@ mod tests {
                             "getjwt",
                             200,
                             json!({"token": tok,
-                            "validUntil": now_loxone_s() + 30 * 86_400, "tokenRights": 4}),
+                            "validUntil": now_loxone_s() + *fake.token_valid_s.lock().unwrap(), "tokenRights": 4}),
                         )
                         .await
                     } else {
@@ -734,6 +772,22 @@ mod tests {
                     let tok = fake.token.lock().unwrap().clone();
                     let ok = *user == USER && *hash == expect_hash(&tok);
                     reply(ws, "authwithtoken", if ok { 200 } else { 401 }, json!("")).await
+                }
+                ["jdev", "sys", "refreshjwt", hash, user] if encrypted => {
+                    let old = fake.token.lock().unwrap().clone();
+                    if *user == USER && *hash == expect_hash(&old) {
+                        *fake.token.lock().unwrap() = "tok-2".into();
+                        reply(
+                            ws,
+                            "refreshjwt",
+                            200,
+                            json!({"token": "tok-2",
+                            "validUntil": now_loxone_s() + 30 * 86_400}),
+                        )
+                        .await
+                    } else {
+                        reply(ws, "refreshjwt", 401, json!("")).await
+                    }
                 }
                 ["data", "LoxAPP3.json"] => send_text(ws, structure().to_string()).await,
                 ["jdev", "sps", "enablebinstatusupdate"] => {
@@ -752,6 +806,7 @@ mod tests {
                     match fake.after {
                         After::Drop => return,
                         After::Silent => silent = true,
+                        After::PingOnly => ping_only = true,
                         After::Stay => {}
                     }
                 }
@@ -958,7 +1013,7 @@ mod tests {
     // rivet: verifies REQ-LOX-003
     #[tokio::test(flavor = "current_thread")]
     async fn reconnects_after_a_drop_or_silence_and_reuses_the_token() {
-        for after in [After::Drop, After::Silent] {
+        for after in [After::Drop, After::Silent, After::PingOnly] {
             let fake = Fake::new(after).await;
             let url = serve(fake.clone()).await;
             let st = lox_state("lox-reconnect");
@@ -1036,6 +1091,48 @@ mod tests {
         assert!(b.received().iter().all(|c| c == "jdev/sys/getPublicKey"));
         assert!(!fresh.exists());
         let _ = std::fs::remove_file(&token_file);
+    }
+
+    // rivet: verifies REQ-LOX-003
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_token_close_to_expiry_is_refreshed() {
+        let fake = Fake::new(After::Stay).await;
+        // The Miniserver hands out a token valid for 2 h: under a day.
+        *fake.token_valid_s.lock().unwrap() = 2 * 3600;
+        let url = serve(fake.clone()).await;
+        let st = lox_state("lox-refresh");
+        let token_file = tmp_file("refresh");
+        let task = tokio::spawn(run_loxone_connection(
+            st.clone(),
+            config(url, PASSWORD, token_file.clone()),
+        ));
+        wait_for("events after a refresh", || {
+            points(&st, CTRL, "Default") == vec![21.5]
+        })
+        .await;
+        task.abort();
+        assert!(fake
+            .received()
+            .iter()
+            .any(|c| c.starts_with("enc:jdev/sys/refreshjwt/")));
+        let saved: StoredToken =
+            serde_json::from_str(&std::fs::read_to_string(&token_file).unwrap()).unwrap();
+        assert_eq!(saved.token, "tok-2");
+        assert!(saved.valid_until > now_loxone_s() + 29 * 86_400);
+        let _ = std::fs::remove_file(&token_file);
+    }
+
+    // rivet: verifies REQ-LOX-003
+    #[test]
+    fn backoff_grows_and_is_capped() {
+        let c = LoxoneConfig::defaults();
+        assert_eq!(backoff_delay(&c, 1), Duration::from_secs(1));
+        assert_eq!(backoff_delay(&c, 2), Duration::from_secs(2));
+        assert_eq!(backoff_delay(&c, 5), Duration::from_secs(16));
+        assert_eq!(backoff_delay(&c, 10), Duration::from_secs(300));
+        assert_eq!(backoff_delay(&c, u32::MAX), Duration::from_secs(300));
+        assert_eq!(c.keepalive, Duration::from_secs(60));
+        assert!(c.silence > c.keepalive * 2 && c.silence < Duration::from_secs(300));
     }
 
     #[test]

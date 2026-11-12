@@ -8,7 +8,7 @@ artifacts:
   - id: REQ-NAME-001
     type: requirement
     title: The project, crates and binary are named haus
-    status: verified
+    status: implemented
     release: v0.4.0
     description: >
       loriot-websocket-mcp becomes haus. LORIOT (LoRaWAN) and Loxone are
