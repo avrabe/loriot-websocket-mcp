@@ -11,12 +11,14 @@
 
 use crate::state::{run_blocking, AppState};
 use futures::{SinkExt, StreamExt};
+use haus_core::import::loxone_quantity;
 use haus_core::ingest::Item;
 use haus_core::loxone::{
-    hmac_hex, parse_value_events, password_hash, public_key_sha256, resolve_states, Cmd, HashAlg,
-    Header, LoxUuid, MsgKind, Response, Secret, Session, LOXONE_EPOCH_UNIX_S,
+    describe_control, hmac_hex, parse_value_events, password_hash, public_key_sha256,
+    resolve_states, Cmd, HashAlg, Header, LoxUuid, MsgKind, Response, Secret, Session,
+    LOXONE_EPOCH_UNIX_S,
 };
-use haus_core::store::{SeriesMeta, Source};
+use haus_core::store::{SeriesKey, SeriesMeta, Source};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -45,6 +47,9 @@ pub struct LoxoneConfig {
     pub token_file: PathBuf,
     /// Optional `{"uuid/field": "stateName or state uuid"}` overrides.
     pub overrides: HashMap<String, String>,
+    /// Controls to follow live although no history was imported for them
+    /// (LOXONE_TRACK): their series are created from the structure file.
+    pub track: Vec<String>,
     /// SHA-256 (hex) of the Miniserver's public key. Without it the first
     /// key seen is trusted and remembered in the token file.
     pub key_pin: Option<String>,
@@ -83,6 +88,14 @@ impl LoxoneConfig {
                 .into(),
             overrides,
             key_pin: var("LOXONE_KEY_SHA256").map(|k| normalize_fingerprint(&k)),
+            track: var("LOXONE_TRACK")
+                .map(|t| {
+                    t.split(|c: char| c == ',' || c.is_whitespace())
+                        .filter(|u| !u.is_empty())
+                        .map(str::to_string)
+                        .collect()
+                })
+                .unwrap_or_default(),
             ..Self::defaults()
         }))
     }
@@ -95,6 +108,7 @@ impl LoxoneConfig {
             token_file: PathBuf::new(),
             overrides: HashMap::new(),
             key_pin: None,
+            track: Vec::new(),
             keepalive: Duration::from_secs(60),
             silence: Duration::from_secs(150),
             request_timeout: Duration::from_secs(20),
@@ -542,16 +556,45 @@ async fn session(state: &AppState, cfg: &LoxoneConfig) -> Result<(), BoxError> {
     // Which state UUIDs feed which series.
     let structure: serde_json::Value =
         serde_json::from_str(&c.request_text(&Cmd::StructureFile, None).await?)?;
+    // Tracked controls without imported history get their series now.
+    let mut tracked = Vec::new();
+    for uuid in &cfg.track {
+        match describe_control(&structure, uuid) {
+            Some(info) if info.value_state.is_some() => {
+                let (quantity, unit) = loxone_quantity(&info.category, &info.name);
+                tracked.push(SeriesMeta {
+                    key: SeriesKey::new(Source::Loxone, uuid.to_lowercase(), "Default"),
+                    quantity,
+                    unit: unit.to_string(),
+                    name: info.name,
+                    room: info.room,
+                });
+            }
+            Some(_) => tracing::warn!("Loxone: tracked control {uuid} has no value state"),
+            None => tracing::warn!("Loxone: tracked control {uuid} is not in the structure file"),
+        }
+    }
     let wanted_meta = {
         let s = state.clone();
-        run_blocking(move || wanted_series(&s).map_err(|e| e.to_string())).await?
+        run_blocking(move || {
+            for meta in &tracked {
+                // Keep the metadata of a series that exists already.
+                if s.ingest.store().series_id(&meta.key)?.is_none() {
+                    s.ingest.store().ensure_series(meta)?;
+                }
+            }
+            wanted_series(&s)
+        })
+        .await
+        .map_err(|e| e.to_string())?
     };
     let wanted: Vec<(String, String)> = wanted_meta.keys().cloned().collect();
     let res = resolve_states(&structure, &wanted, &cfg.overrides);
     tracing::info!(
-        "Loxone: {} of {} series mapped to states",
-        res.states.len(),
-        wanted.len()
+        "Loxone: {} of {} series mapped to states, {} retired",
+        res.states.values().map(Vec::len).sum::<usize>(),
+        wanted.len(),
+        res.retired.len()
     );
     for u in &res.unresolved {
         tracing::warn!("Loxone: unmapped series {u}");
@@ -581,9 +624,14 @@ async fn session(state: &AppState, cfg: &LoxoneConfig) -> Result<(), BoxError> {
                     let ts_ms = chrono::Utc::now().timestamp_millis();
                     let items: Vec<Item> = parse_value_events(&b)?
                         .into_iter()
-                        .filter_map(|(u, value)| {
-                            let key = res.states.get(&u)?;
-                            Some(Item { meta: wanted_meta.get(key)?.clone(), ts_ms, value })
+                        .flat_map(|(u, value)| {
+                            res.states
+                                .get(&u)
+                                .into_iter()
+                                .flatten()
+                                .filter_map(|key| wanted_meta.get(key))
+                                .map(move |meta| Item { meta: meta.clone(), ts_ms, value })
+                                .collect::<Vec<_>>()
                         })
                         .collect();
                     if !items.is_empty() {
@@ -646,6 +694,9 @@ mod tests {
     const ROOM: &str = "1d000000-0000-0001-ffff000000000001";
     const ROOM_TARGET: &str = "1d000000-0000-0001-ffff000000000003";
     const UNKNOWN: &str = "0e000000-0000-0000-0000000000000099";
+    /// A sensor with no imported history, followed through LOXONE_TRACK.
+    const TRACKED: &str = "1e000000-0000-0002-ffff000000000001";
+    const TRACKED_STATE: &str = "1e000000-0000-0002-ffff000000000002";
 
     #[derive(Clone, Copy, PartialEq)]
     enum After {
@@ -704,7 +755,12 @@ mod tests {
     }
 
     fn structure() -> serde_json::Value {
-        json!({"lastModified": "2026-11-12 10:00:00", "controls": {
+        json!({"lastModified": "2026-11-12 10:00:00",
+            "rooms": {"r1": {"name": "Room A"}},
+            "cats": {"c1": {"name": "Luftfeuchte"}},
+            "controls": {
+            TRACKED: {"type": "InfoOnlyAnalog", "uuidAction": TRACKED, "name": "Air sensor",
+                      "room": "r1", "cat": "c1", "states": {"value": TRACKED_STATE}},
             CTRL: {"type": "InfoOnlyAnalog", "uuidAction": CTRL, "states": {"value": CTRL_STATE}},
             ROOM: {"type": "IRoomControllerV2", "uuidAction": ROOM,
                    "states": {"tempActual": "1d000000-0000-0001-ffff000000000002",
@@ -897,6 +953,7 @@ mod tests {
                         (LoxUuid::parse(CTRL_STATE).unwrap(), 21.5),
                         (LoxUuid::parse(ROOM_TARGET).unwrap(), 19.0),
                         (LoxUuid::parse(UNKNOWN).unwrap(), 5.0),
+                        (LoxUuid::parse(TRACKED_STATE).unwrap(), 55.0),
                     ]);
                     ws.send(Message::Binary(
                         Header::encode(2, ev.len() as u32).to_vec().into(),
@@ -954,6 +1011,7 @@ mod tests {
             token_file,
             overrides: HashMap::from([(format!("{ROOM}/HCm"), "tempTarget".to_string())]),
             key_pin: None,
+            track: Vec::new(),
             keepalive: Duration::from_millis(100),
             silence: Duration::from_millis(400),
             request_timeout: Duration::from_secs(5),
@@ -1286,6 +1344,48 @@ mod tests {
             "https://ms.example:443"
         );
         assert!(http_base("http://host").is_err());
+    }
+
+    // rivet: verifies REQ-LOX-005
+    // rivet: verifies DD-013
+    #[tokio::test(flavor = "current_thread")]
+    async fn tracked_controls_get_series_and_retired_fields_get_nothing() {
+        let _serial = crate::state::tests::serial().await;
+        let logs = global_logs();
+        let fake = Fake::new(After::Stay).await;
+        let url = serve(fake.clone()).await;
+        let st = lox_state("lox-track");
+        let token_file = tmp_file("track");
+        let mut cfg = config(url, PASSWORD, token_file.clone());
+        cfg.overrides = HashMap::from([(format!("{ROOM}/HCm"), "-".to_string())]);
+        cfg.track = vec![TRACKED.to_uppercase()];
+        let task = tokio::spawn(run_loxone_connection(st.clone(), cfg));
+        wait_for("the tracked sensor's value", || {
+            st.ingest
+                .store()
+                .series_id(&SeriesKey::new(Source::Loxone, TRACKED, "Default"))
+                .unwrap()
+                .is_some_and(|_| points(&st, TRACKED, "Default") == vec![55.0])
+        })
+        .await;
+        task.abort();
+        let metas = st.ingest.store().series().unwrap();
+        let t = metas
+            .iter()
+            .find(|(_, m)| m.key.source_id == TRACKED)
+            .unwrap();
+        assert_eq!(t.1.name, "Air sensor");
+        assert_eq!(t.1.room.as_deref(), Some("Room A"));
+        assert_eq!(t.1.quantity, haus_core::store::Quantity::Humidity);
+        // The retired field got nothing, the plain one did.
+        assert!(points(&st, ROOM, "HCm").is_empty());
+        assert_eq!(points(&st, CTRL, "Default"), vec![21.5]);
+        let log = String::from_utf8(logs.0.lock().unwrap().clone()).unwrap();
+        assert!(
+            log.contains("2 of 3 series mapped to states, 1 retired"),
+            "{log}"
+        );
+        let _ = std::fs::remove_file(&token_file);
     }
 
     #[test]

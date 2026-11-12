@@ -40,7 +40,10 @@ Environment:
   LOXONE_TOKEN_FILE  where the Miniserver token is kept (default loxone-token.json)
   LOXONE_KEY_SHA256  SHA-256 of the Miniserver's public key; a different key is
                    refused before any login (without it: trust on first use)
-  LOXONE_MAP       optional JSON file {\"<uuid>/<field>\": \"<state name or uuid>\"}
+  LOXONE_MAP       optional JSON file {\"<uuid>/<field>\": \"<state name or uuid>\"};
+                   the value \"-\" retires a series (history kept, not followed live)
+  LOXONE_TRACK     control uuids (comma separated) to follow live although no
+                   history was imported; name and room come from the Miniserver
   BIND             listen address (falls back to HOST, default 0.0.0.0)
   PORT             listen port (default 3000)
   RUST_LOG         log filter (default haus=debug,tower_http=info)";

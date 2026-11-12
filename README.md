@@ -36,7 +36,8 @@ LORIOT_WS_TOKEN=... BIND=127.0.0.1 PORT=3000 ./haus
 | `LOXONE_URL`      | (unset: Loxone off)            | `ws://host[:port]` or `wss://host[:port]` of a Loxone Miniserver |
 | `LOXONE_USER`, `LOXONE_PASSWORD` | (required with `LOXONE_URL`) | a Miniserver user; read only from the environment |
 | `LOXONE_TOKEN_FILE` | `loxone-token.json`          | where the Miniserver token is kept (written with mode 0600) |
-| `LOXONE_MAP`      | (none)                         | JSON `{"<control uuid>/<field>": "<state name or state uuid>"}` for fields other than `Default` |
+| `LOXONE_MAP`      | (none)                         | JSON `{"<control uuid>/<field>": "<state name or state uuid>"}` for fields other than `Default`; `"-"` retires a series (its history stays, it is not followed live and not reported as unmapped) |
+| `LOXONE_TRACK`    | (none)                         | control UUIDs, comma separated, to follow live without imported history; name, room and kind come from the Miniserver's structure file |
 | `LOXONE_KEY_SHA256` | (trust on first use)         | SHA-256 of the Miniserver's public key; a different key is refused before any login |
 | `BIND`            | `HOST`, else `0.0.0.0`         | listen address, e.g. `127.0.0.1` behind a reverse proxy |
 | `PORT`            | `3000`                         | listen port |
@@ -80,8 +81,8 @@ Events are stored for the Loxone series the store already has, normally the
 ones a Stats4Lox import created, keyed by control UUID and field. A field
 `Default` maps to the control's `value` state. Other fields, such as a room
 controller's outputs, need a `LOXONE_MAP` entry naming the state. At startup
-haus logs `Loxone: N of M series mapped to states` and every series it
-could not map. When the structure file lists far fewer controls than haus has
+haus logs `Loxone: N of M series mapped to states, R retired` and every
+series it could not map. When the structure file lists far fewer controls than haus has
 Loxone sensors, the Miniserver user lacks rights: it shows a user only the
 controls that user may see. Give the user visualisation rights on the
 controls in Loxone Config, or use another user.
