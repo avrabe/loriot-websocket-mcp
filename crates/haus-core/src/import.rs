@@ -175,7 +175,7 @@ fn write_and_check(
 }
 
 /// The LoRaWAN fields the import keeps: (JSON key, series field, quantity, unit).
-const LORIOT_FIELDS: [(&str, &str, Quantity, &str); 6] = [
+pub(crate) const LORIOT_FIELDS: [(&str, &str, Quantity, &str); 6] = [
     (
         "parsed_temperature",
         "temperature",

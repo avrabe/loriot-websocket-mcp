@@ -108,7 +108,7 @@ pub async fn run_loriot_connection_with(state: AppState, cfg: LoriotClientConfig
 
         let mut received_data = false;
         let result = run_session(&state, &cfg, &mut received_data).await;
-        state.upstream.set_connected(false);
+        state.sources.loriot.set_connected(false);
 
         match result {
             Ok(()) => tracing::info!("Loriot connection closed by upstream"),
@@ -161,7 +161,7 @@ async fn run_session(
     state
         .set_connection_status(ConnectionStatus::Connected)
         .await;
-    state.upstream.set_connected(true);
+    state.sources.loriot.set_connected(true);
     tracing::info!("Connected to Loriot");
 
     // Request cached messages from the last 24 hours
@@ -191,7 +191,7 @@ async fn run_session(
                     match message {
                         Message::Text(text) => {
                             *received_data = true;
-                            state.upstream.record_message();
+                            state.sources.loriot.record_message();
                             if let Err(e) = handle_text(state, text.as_str()).await {
                                 tracing::warn!("Error handling message: {}", e);
                             }
@@ -283,8 +283,7 @@ mod tests {
     //! silent upstream within a bounded time, reconnect, and never starve the
     //! runtime. All tests use a local plain-`ws://` server and a dummy token.
     use super::*;
-    use haus_core::{AppConfig, StorageConfig, StorageManager};
-    use std::collections::HashMap;
+    use haus_core::AppConfig;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
     use std::time::Instant;
@@ -294,16 +293,8 @@ mod tests {
     const DUMMY_TOKEN: &str = "dummy-test-token";
 
     fn test_state(name: &str) -> AppState {
-        let path =
-            std::env::temp_dir().join(format!("loriot-test-{}-{}.jsonl", name, std::process::id()));
-        let _ = std::fs::remove_file(&path);
-        let storage = StorageManager::new(StorageConfig {
-            file_path: path.to_string_lossy().into_owned(),
-            ..Default::default()
-        });
-        AppState::new(
-            storage,
-            HashMap::new(),
+        crate::state::tests::test_state(
+            name,
             AppConfig {
                 loriot_token: DUMMY_TOKEN.to_string(),
                 device_names_file: None,
@@ -422,11 +413,13 @@ mod tests {
         }
     }
 
+    // rivet: verifies REQ-LORIOT-001
     #[tokio::test(flavor = "current_thread")]
     async fn reconnects_when_upstream_goes_silent() {
         assert_reconnects(Upstream::GoSilent, fast(), Duration::from_secs(5)).await;
     }
 
+    // rivet: verifies REQ-LORIOT-001
     #[tokio::test(flavor = "current_thread")]
     async fn reconnects_when_upstream_drops_tcp() {
         assert_reconnects(Upstream::DropTcp, fast(), Duration::from_secs(6)).await;
@@ -438,6 +431,7 @@ mod tests {
         assert_reconnects(Upstream::NoHandshake, fast(), Duration::from_secs(20)).await;
     }
 
+    // rivet: verifies REQ-LORIOT-001
     #[tokio::test(flavor = "current_thread")]
     async fn keeps_a_quiet_upstream_that_answers_pings() {
         let (url, accepts) = spawn_upstream(Upstream::QuietButAlive).await;

@@ -52,7 +52,7 @@ artifacts:
   - id: REQ-STORE-001
     type: requirement
     title: The full history is stored durably and queried without stalling
-    status: approved
+    status: verified
     release: v0.4.0
     description: >
       All points of all series are kept on disk. Range queries read only the
@@ -126,7 +126,7 @@ artifacts:
   - id: REQ-LORIOT-001
     type: requirement
     title: LORIOT websocket ingestion keeps its current guarantees
-    status: approved
+    status: verified
     release: v0.4.0
     description: >
       The existing client's behaviour carries over: bounded handshake and
@@ -193,7 +193,7 @@ artifacts:
   - id: REQ-HEALTH-001
     type: requirement
     title: /health reports every source
-    status: approved
+    status: verified
     release: v0.4.0
     description: >
       GET /health answers 200 while the process lives and carries, per source,

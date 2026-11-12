@@ -281,6 +281,9 @@ mod tests {
             file_path: path.to_string_lossy().into_owned(),
             ..Default::default()
         });
+        let store = std::sync::Arc::new(
+            haus_core::store::Store::open(path.with_extension("redb")).unwrap(),
+        );
         AppState::new(
             storage,
             HashMap::new(),
@@ -288,6 +291,8 @@ mod tests {
                 device_names_file: None,
                 ..Default::default()
             },
+            std::sync::Arc::new(haus_core::ingest::Ingestor::new(store)),
+            crate::state::Sources::default(),
         )
     }
 
