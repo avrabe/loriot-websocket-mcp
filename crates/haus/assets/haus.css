@@ -53,3 +53,6 @@ td.num { font-family: var(--mono); text-align: right; }
 tr.stale td { color: var(--stale); }
 .empty { color: var(--dim); padding: 2rem 0; }
 @media (max-width: 600px) { .top { gap: .8rem; } table { font-size: .85rem; } }
+.room.warned { border-color: var(--warn); }
+.warn { color: var(--warn); font-size: .85rem; list-style: none; padding: .15rem 0; }
+.warnings { list-style: none; margin-bottom: 1rem; }

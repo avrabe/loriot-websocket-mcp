@@ -459,3 +459,89 @@ artifacts:
     links:
       - type: traces-to
         target: REQ-LOX-001
+
+  # --- Warnings (owner, 2026-11-12: into v0.4.0) ---
+  - id: REQ-WARN-001
+    type: requirement
+    title: Warnings for values that need attention
+    status: verified
+    release: v0.4.0
+    description: >
+      haus evaluates its current data and shows warnings on the room overview
+      (on the room's card), on the status page (all warnings), and as JSON at
+      GET /api/warnings. Each warning names its kind, room, series and
+      since when it holds. Thresholds come from an optional HAUS_WARNINGS
+      JSON file with defaults, overridable per room; rooms can be declared
+      outdoor (no climate warnings) or frost-only (cellar, garage).
+    fields:
+      priority: must
+      category: functional
+    links:
+      - type: constraint-satisfies
+        target: SC-003
+
+  - id: REQ-WARN-002
+    type: requirement
+    title: Mould risk
+    status: verified
+    release: v0.4.0
+    description: >
+      A room whose humidity stays at or above the threshold (default 65 %)
+      for the whole window (default 4 h) gets a mould-risk warning. A value
+      that held from before the window counts (Loxone sends only changes).
+    fields:
+      priority: must
+      category: functional
+    links:
+      - type: traces-to
+        target: REQ-WARN-001
+
+  - id: REQ-WARN-003
+    type: requirement
+    title: Too cold and too warm
+    status: verified
+    release: v0.4.0
+    description: >
+      A room's current air temperature below the cold threshold (default
+      16 °C; frost rooms: default 3 °C) or above the warm threshold (default
+      26 °C) gets a warning. Floor probes, radiator and valve temperatures
+      are not room air and never count.
+    fields:
+      priority: must
+      category: functional
+    links:
+      - type: traces-to
+        target: REQ-WARN-001
+
+  - id: REQ-WARN-004
+    type: requirement
+    title: Silent sensors and sources, low batteries
+    status: verified
+    release: v0.4.0
+    description: >
+      A LoRaWAN sensor without a value for longer than the silence threshold
+      (default 60 min), a source that is not connected, and a battery voltage
+      below the threshold (default 2.6 V) each get a warning.
+    fields:
+      priority: must
+      category: functional
+    links:
+      - type: traces-to
+        target: REQ-WARN-001
+
+  - id: REQ-WARN-005
+    type: requirement
+    title: Heating anomaly
+    status: verified
+    release: v0.4.0
+    description: >
+      A valve in a room open at or above the threshold (default 50 %) for the
+      whole window (default 2 h) while the room's air temperature rose less
+      than the minimum (default 0.3 K) gets a warning. (Heating with a window
+      open needs window states haus does not record yet; later.)
+    fields:
+      priority: should
+      category: functional
+    links:
+      - type: traces-to
+        target: REQ-WARN-001

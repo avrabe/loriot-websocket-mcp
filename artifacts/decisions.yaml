@@ -349,3 +349,38 @@ artifacts:
         target: REQ-LOX-001
       - type: satisfies
         target: REQ-LOX-005
+
+  - id: DD-014
+    type: design-decision
+    title: Warnings are evaluated on request from the store
+    status: verified
+    release: v0.4.0
+    description: >
+      A pure evaluator over each series' latest value and a recent window;
+      pages and /api/warnings call it. No state, no notifications.
+    fields:
+      decision: >
+        haus_core::warn evaluates rules over series metadata, recent points and
+        source connection state at a given time. Room air temperature is the
+        median of the room's air-temperature series (floor probes, radiator
+        and valve temperatures excluded by name patterns, configurable).
+        Notifications stay out of haus; wohl's alert dispatcher is where they
+        belong (REQ-WOHL-001).
+      rationale: >
+        Stateless evaluation can be tested as a function of data and time, and
+        shows the same thing on every page. Data and pages are the system of
+        record; notification needs dedup and rate limits wohl already has.
+      alternatives: A background evaluator with stored alert state; push notifications from haus.
+    links:
+      - type: satisfies
+        target: REQ-WARN-001
+      - type: satisfies
+        target: REQ-WARN-002
+      - type: satisfies
+        target: REQ-WARN-003
+      - type: satisfies
+        target: REQ-WARN-004
+      - type: satisfies
+        target: REQ-WARN-005
+      - type: traces-to
+        target: REQ-WOHL-001

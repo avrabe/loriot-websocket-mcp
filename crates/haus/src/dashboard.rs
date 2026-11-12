@@ -14,6 +14,7 @@ use axum::{
 };
 use haus_core::chart;
 use haus_core::store::{Quantity, SeriesId, SeriesMeta, Source};
+use haus_core::warn::{self, Kind, Warning};
 use std::collections::BTreeMap;
 
 const PAGE: &str = include_str!("../assets/page.html");
@@ -161,7 +162,31 @@ fn source_chips(live: Live) -> String {
 
 /// The overview: every room, its climate and heating values with their age
 /// (REQ-UI-001). The wrapper re-fetches itself every 30 s.
-pub fn render_overview(views: &[SeriesView], live: Live, now_ms: i64) -> String {
+fn warn_icon(k: Kind) -> &'static str {
+    match k {
+        Kind::MouldRisk => "💧",
+        Kind::TooCold | Kind::Frost => "❄️",
+        Kind::TooWarm => "🔥",
+        Kind::SensorSilent | Kind::SourceDown => "📡",
+        Kind::BatteryLow => "🔋",
+        Kind::HeatingAnomaly => "♨️",
+    }
+}
+
+fn warn_item(w: &Warning) -> String {
+    format!(
+        r#"<li class="warn">{} {}</li>"#,
+        warn_icon(w.kind),
+        esc(&w.message)
+    )
+}
+
+pub fn render_overview(
+    views: &[SeriesView],
+    live: Live,
+    now_ms: i64,
+    warnings: &[Warning],
+) -> String {
     let mut rooms: BTreeMap<String, Vec<&SeriesView>> = BTreeMap::new();
     for v in views.iter().filter(|v| {
         rank(v.meta.quantity) < 9
@@ -177,13 +202,38 @@ pub fn render_overview(views: &[SeriesView], live: Live, now_ms: i64) -> String 
         r#"<div id="overview" hx-get="/partials/overview" hx-trigger="every 30s" hx-swap="outerHTML">"#,
     );
     s += &source_chips(live);
+    let room_names: std::collections::HashSet<&str> = rooms.keys().map(String::as_str).collect();
+    let elsewhere: Vec<&Warning> = warnings
+        .iter()
+        .filter(|w| !room_names.contains(w.room.as_str()))
+        .collect();
+    if !elsewhere.is_empty() {
+        s += r#"<ul class="warnings">"#;
+        for w in elsewhere {
+            s += &format!(
+                r#"<li class="warn">{} <b>{}</b>: {}</li>"#,
+                warn_icon(w.kind),
+                esc(&w.room),
+                esc(&w.message)
+            );
+        }
+        s += "</ul>";
+    }
     if rooms.is_empty() {
         s += r#"<p class="empty">No series yet. Import a history or connect a source.</p>"#;
     }
     s += r#"<section class="rooms">"#;
     for (room, mut vs) in rooms {
         vs.sort_by_key(|v| (rank(v.meta.quantity), v.meta.name.clone(), v.id));
-        s += &format!(r#"<article class="room"><h2>{}</h2><ul>"#, esc(&room));
+        let mine: Vec<&Warning> = warnings.iter().filter(|w| w.room == room).collect();
+        s += &format!(
+            r#"<article class="room{}"><h2>{}</h2><ul>"#,
+            if mine.is_empty() { "" } else { " warned" },
+            esc(&room)
+        );
+        for w in mine {
+            s += &warn_item(w);
+        }
         for v in vs {
             let stale = is_stale(v, live, now_ms);
             let (val, when) = match v.latest {
@@ -275,8 +325,29 @@ pub fn render_sensor(
 }
 
 /// Sources, batteries and the age of every series (REQ-UI-003).
-pub fn render_status(views: &[SeriesView], live: Live, now_ms: i64, health: &str) -> String {
+pub fn render_status(
+    views: &[SeriesView],
+    live: Live,
+    now_ms: i64,
+    health: &str,
+    warnings: &[Warning],
+) -> String {
     let mut s = String::from("<h1>Status</h1>");
+    if warnings.is_empty() {
+        s += r#"<p class="facts"><span>No warnings.</span></p>"#;
+    } else {
+        s += "<h2>Warnings</h2><table><tr><th>Room</th><th>Warning</th><th>Since</th></tr>";
+        for w in warnings {
+            s += &format!(
+                "<tr><td>{}</td><td>{} {}</td><td>{}</td></tr>",
+                esc(&w.room),
+                warn_icon(w.kind),
+                esc(&w.message),
+                w.since_ms.map(|t| esc(&age(now_ms, t))).unwrap_or_default()
+            );
+        }
+        s += "</table>";
+    }
     s += &source_chips(live);
     s += &format!(r#"<p class="facts"><span>{}</span></p>"#, esc(health));
     let batteries: Vec<&SeriesView> = views
@@ -362,10 +433,54 @@ async fn views(state: &AppState) -> Result<Vec<SeriesView>, String> {
     run_blocking(move || load_views(&s)).await
 }
 
+/// The current warnings (REQ-WARN-001), evaluated from the store; blocking
+/// reads off the runtime. An unreadable store gives no warnings, logged.
+pub async fn warnings(state: &AppState) -> Vec<Warning> {
+    let s = state.clone();
+    let now = now_ms();
+    let lv = live(state);
+    let result = run_blocking(move || -> Result<Vec<Warning>, String> {
+        let store = s.ingest.store();
+        let window = warn::window_ms(&s.warn);
+        let mut data = Vec::new();
+        for (id, meta) in store.series().map_err(|e| e.to_string())? {
+            // The window, and the value standing at its start.
+            let hold = chart::hold_ms(meta.key.source);
+            let recent = store
+                .range(id, now - window - hold, now)
+                .map_err(|e| e.to_string())?;
+            data.push(warn::SeriesData {
+                id,
+                latest: recent.last().copied(),
+                meta,
+                recent,
+            });
+        }
+        let mut sources = vec![(haus_core::store::Source::Loriot, lv.loriot)];
+        if let Some(l) = lv.loxone {
+            sources.push((haus_core::store::Source::Loxone, l));
+        }
+        Ok(warn::evaluate(&data, &sources, now, &s.warn))
+    })
+    .await;
+    result.unwrap_or_else(|e| {
+        tracing::error!("warnings: {e}");
+        Vec::new()
+    })
+}
+
+/// GET /api/warnings
+pub async fn warnings_api(State(state): State<AppState>) -> axum::Json<Vec<Warning>> {
+    axum::Json(warnings(&state).await)
+}
+
 /// GET /
 pub async fn overview_page(State(state): State<AppState>) -> Response {
     match views(&state).await {
-        Ok(v) => page("Rooms", &render_overview(&v, live(&state), now_ms())).into_response(),
+        Ok(v) => {
+            let w = warnings(&state).await;
+            page("Rooms", &render_overview(&v, live(&state), now_ms(), &w)).into_response()
+        }
         Err(e) => error(e),
     }
 }
@@ -373,7 +488,10 @@ pub async fn overview_page(State(state): State<AppState>) -> Response {
 /// GET /partials/overview
 pub async fn overview_partial(State(state): State<AppState>) -> Response {
     match views(&state).await {
-        Ok(v) => Html(render_overview(&v, live(&state), now_ms())).into_response(),
+        Ok(v) => {
+            let w = warnings(&state).await;
+            Html(render_overview(&v, live(&state), now_ms(), &w)).into_response()
+        }
         Err(e) => error(e),
     }
 }
@@ -440,7 +558,7 @@ pub async fn status_page(State(state): State<AppState>) -> Response {
             );
             page(
                 "Status",
-                &render_status(&v, live(&state), now_ms(), &health),
+                &render_status(&v, live(&state), now_ms(), &health, &warnings(&state).await),
             )
             .into_response()
         }
@@ -569,7 +687,7 @@ mod tests {
             loriot: true,
             loxone: Some(true),
         };
-        let html = render_overview(&sample(), live, NOW);
+        let html = render_overview(&sample(), live, NOW, &[]);
         // Rooms in order, each a card; the battery is not on the overview.
         let cellar = html.find("<h2>Cellar</h2>").expect("Cellar room");
         let room_a = html.find("<h2>Room A</h2>").expect("Room A room");
@@ -597,7 +715,7 @@ mod tests {
         assert!(!html.contains("/sensor/5\""));
         let mut old = sample();
         old[1].latest = Some((NOW - OVERVIEW_MAX_AGE_MS - 1, 5.0));
-        assert!(!render_overview(&old, live, NOW).contains("/sensor/1\""));
+        assert!(!render_overview(&old, live, NOW, &[]).contains("/sensor/1\""));
         // Names are escaped.
         assert!(html.contains("Valve &lt;b&gt;") && !html.contains("Valve <b>"));
         // The overview refreshes itself.
@@ -611,6 +729,7 @@ mod tests {
                 loxone: Some(false),
             },
             NOW,
+            &[],
         );
         assert!(html.contains("Loxone not connected"));
         let i = html.find("/sensor/3\"").unwrap();
@@ -628,6 +747,7 @@ mod tests {
             },
             NOW,
             "6 series",
+            &[],
         );
         assert!(html.contains("LoRaWAN not connected") && html.contains("Loxone connected"));
         assert!(html.contains("<h2>Batteries</h2>") && html.contains("3.1 V"));
@@ -662,6 +782,53 @@ mod tests {
         for (k, _, _) in chart::RANGES {
             assert!(html.contains(&format!("range={k}")));
         }
+    }
+
+    // rivet: verifies REQ-WARN-001
+    #[test]
+    fn warnings_show_on_their_room_and_on_the_status_page() {
+        let live = Live {
+            loriot: true,
+            loxone: Some(false),
+        };
+        let w = vec![
+            Warning {
+                kind: Kind::MouldRisk,
+                room: "Room A".into(),
+                series: vec![4],
+                message: "RH <x> at or above 65 % for 4 h: mould risk".into(),
+                since_ms: Some(NOW - 4 * 3_600_000),
+            },
+            Warning {
+                kind: Kind::SourceDown,
+                room: "loxone".into(),
+                series: vec![],
+                message: "loxone is not connected".into(),
+                since_ms: None,
+            },
+        ];
+        let html = render_overview(&sample(), live, NOW, &w);
+        // On Room A's card, escaped; the card is marked.
+        let card = &html[html.find("<h2>Room A</h2>").unwrap()..];
+        let card = &card[..card.find("</article>").unwrap()];
+        assert!(
+            card.contains("mould risk") && card.contains("RH &lt;x&gt;"),
+            "{card}"
+        );
+        assert!(html.contains(r#"<article class="room warned"><h2>Room A</h2>"#));
+        // Not on another room's card.
+        let other = &html[html.find("<h2>Cellar</h2>").unwrap()..];
+        assert!(!other[..other.find("</article>").unwrap()].contains("mould"));
+        // A source warning sits above the rooms.
+        assert!(html.find("loxone is not connected").unwrap() < html.find("<section").unwrap());
+        // The status page lists both, with the age.
+        let st = render_status(&sample(), live, NOW, "x", &w);
+        assert!(
+            st.contains("<h2>Warnings</h2>")
+                && st.contains("4 h ago")
+                && st.contains("not connected")
+        );
+        assert!(render_status(&sample(), live, NOW, "x", &[]).contains("No warnings."));
     }
 
     #[test]
@@ -708,6 +875,7 @@ mod tests {
             .route("/sensor/{id}", get(sensor_page))
             .route("/status", get(status_page))
             .route("/static/{name}", get(static_file))
+            .route("/api/warnings", get(warnings_api))
             .with_state(state)
     }
 
@@ -752,6 +920,10 @@ mod tests {
         assert!(b.contains(r#"range=7d" class="on""#));
         assert_eq!(get(&app, "/sensor/999").await.0, StatusCode::NOT_FOUND);
         assert_eq!(get(&app, "/status").await.0, StatusCode::OK);
+        let (s, b) = get(&app, "/api/warnings").await;
+        assert_eq!(s, StatusCode::OK);
+        // 19.5 °C in Kitchen: no climate warning; the source is not connected.
+        assert!(b.starts_with('[') && b.contains("\"source_down\""), "{b}");
         assert_eq!(get(&app, "/static/haus.css").await.0, StatusCode::OK);
         assert_eq!(
             get(&app, "/static/htmx-2.0.4.min.js").await.0,

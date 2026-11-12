@@ -78,6 +78,8 @@ pub struct AppState {
     pub sources: Arc<Sources>,
     /// Writes readings into the time-series store
     pub ingest: Arc<Ingestor>,
+    /// Warning thresholds (HAUS_WARNINGS, else defaults).
+    pub warn: Arc<haus_core::warn::WarnConfig>,
 }
 
 impl AppState {
@@ -100,6 +102,7 @@ impl AppState {
             config,
             sources: Arc::new(sources),
             ingest,
+            warn: Arc::new(haus_core::warn::WarnConfig::default()),
         }
     }
 

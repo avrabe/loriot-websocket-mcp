@@ -100,6 +100,31 @@ Pages are rendered by the server. The only script is the vendored htmx
 there was no data: a LoRaWAN value stands for 30 minutes, a Loxone value
 (sent only on change) for 24 hours.
 
+### Warnings
+
+haus shows warnings on the room's card, on the status page, and as JSON at
+`GET /api/warnings`. It evaluates the current data on every request and
+sends no notifications.
+
+| Warning | When (defaults) |
+|---------|-----------------|
+| mould risk | a room's humidity at or above 65 % for 4 h |
+| too cold / too warm | the room's air temperature below 16 °C or above 26 °C (median of its air sensors; floor probes, radiator and valve temperatures do not count) |
+| frost | below `frost_c` in rooms declared frost-only (cellar, garage) |
+| sensor silent / source down | a LoRaWAN sensor without a value for 60 min; a source not connected |
+| battery low | below 2.6 V, or 20 % for batteries that report % |
+| heating anomaly | a valve at or above 50 % for 2 h while the room warmed less than 0.3 K |
+
+`HAUS_WARNINGS` points to a JSON file that changes any of these:
+
+```json
+{"defaults": {"mould_rh": 65, "cold_c": 17},
+ "rooms": {"Cellar": {"frost_c": 3}, "Terrace": {"outdoor": true}, "Office": {"cold_c": 15}},
+ "not_air": ["Fußboden", "Heizkörper", "Stellantrieb"]}
+```
+
+Unknown keys are an error at startup.
+
 ### Importing history
 
 ```sh

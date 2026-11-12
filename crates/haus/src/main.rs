@@ -42,6 +42,8 @@ Environment:
                    refused before any login (without it: trust on first use)
   LOXONE_MAP       optional JSON file {\"<uuid>/<field>\": \"<state name or uuid>\"};
                    the value \"-\" retires a series (history kept, not followed live)
+  HAUS_WARNINGS    optional JSON file with warning thresholds and per-room
+                   settings (outdoor, frost_c, mould_rh, cold_c, warm_c)
   LOXONE_TRACK     control uuids (comma separated) to follow live although no
                    history was imported; name and room come from the Miniserver
   BIND             listen address (falls back to HOST, default 0.0.0.0)
@@ -267,8 +269,21 @@ async fn run() -> anyhow::Result<()> {
         loxone: loxone.as_ref().map(|_| UpstreamHealth::default()),
     };
 
+    // Warning thresholds; a broken file is an error, not silently ignored.
+    let warn_cfg = match std::env::var("HAUS_WARNINGS")
+        .ok()
+        .filter(|p| !p.is_empty())
+    {
+        Some(p) => serde_json::from_str::<haus_core::warn::WarnConfig>(
+            &std::fs::read_to_string(&p).map_err(|e| anyhow::anyhow!("HAUS_WARNINGS {p}: {e}"))?,
+        )
+        .map_err(|e| anyhow::anyhow!("HAUS_WARNINGS {p}: {e}"))?,
+        None => haus_core::warn::WarnConfig::default(),
+    };
+
     // Create shared application state
-    let state = AppState::new(storage, device_names, config.clone(), ingest, sources);
+    let mut state = AppState::new(storage, device_names, config.clone(), ingest, sources);
+    state.warn = std::sync::Arc::new(warn_cfg);
 
     // Build main API router
     let app = Router::new()
@@ -286,6 +301,7 @@ async fn run() -> anyhow::Result<()> {
         .route("/partials/overview", get(dashboard::overview_partial))
         .route("/sensor/{id}", get(dashboard::sensor_page))
         .route("/status", get(dashboard::status_page))
+        .route("/api/warnings", get(dashboard::warnings_api))
         .route("/static/{name}", get(dashboard::static_file))
         // SSE routes
         .route("/sse/readings", get(sse::readings_stream))

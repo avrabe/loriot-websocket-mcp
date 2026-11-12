@@ -28,6 +28,7 @@ pub mod sensors;
 pub mod storage;
 pub mod store;
 pub mod thermal;
+pub mod warn;
 pub mod weather;
 
 // Re-export commonly used types

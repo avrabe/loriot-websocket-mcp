@@ -272,7 +272,13 @@ pub fn import_loriot(
 pub fn loxone_quantity(category: &str, measurement: &str) -> (Quantity, &'static str) {
     let c = category.to_lowercase();
     let m = measurement.to_lowercase();
-    if c.starts_with("temperatur") || m.starts_with("temperatur") || c.starts_with("temperature") {
+    if c.contains("batter") || m.contains("batter") {
+        // Loxone Air battery outputs, once visualised: % or V from the format.
+        (Quantity::BatteryVoltage, "")
+    } else if c.starts_with("temperatur")
+        || m.starts_with("temperatur")
+        || c.starts_with("temperature")
+    {
         (Quantity::Temperature, "°C")
     } else if c.contains("luftfeucht") || m.contains("luftfeucht") || c.contains("humidity") {
         (Quantity::Humidity, "%")
@@ -949,6 +955,10 @@ mod tests {
             Quantity::Heating
         );
         assert_eq!(loxone_quantity("", "Pumpe").0, Quantity::Heating);
+        assert_eq!(
+            loxone_quantity("Einstellungen", "Batteriestatus Air").0,
+            Quantity::BatteryVoltage
+        );
         assert_eq!(loxone_quantity("Licht", "Dimmer").0, Quantity::Other);
     }
 }
