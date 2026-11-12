@@ -134,6 +134,10 @@ pub struct SeriesData {
     pub meta: SeriesMeta,
     pub latest: Option<(i64, f64)>,
     pub recent: Vec<(i64, f64)>,
+    /// The source delivers this series live. A series it does not follow (a
+    /// retired or unmapped Loxone series) keeps an old stored value that
+    /// says nothing about now, so no rule looks at it.
+    pub followed: bool,
 }
 
 /// How far back the evaluator needs points of `meta`'s series, in ms. The
@@ -243,7 +247,7 @@ pub fn evaluate(
         }
     }
     let mut rooms: BTreeMap<&str, Vec<&SeriesData>> = BTreeMap::new();
-    for s in series {
+    for s in series.iter().filter(|s| s.followed) {
         rooms.entry(room_of(&s.meta)).or_default().push(s);
     }
     for (room, all) in &rooms {
@@ -442,6 +446,7 @@ mod tests {
             },
             latest: pts.last().copied(),
             recent: pts.to_vec(),
+            followed: true,
         }
     }
 
@@ -944,5 +949,53 @@ mod tests {
         assert_eq!(silent.len(), 1, "{silent:?}");
         assert_eq!(silent[0].series, vec![10, 11, 12]);
         assert_eq!(silent[0].message, "Cellar sensor sent nothing for 62 min");
+    }
+
+    // rivet: verifies REQ-WARN-006
+    #[test]
+    fn a_series_not_followed_live_takes_no_part_in_any_rule() {
+        let cfg = WarnConfig::default();
+        let up = [(Source::Loxone, true)];
+        const D: i64 = 24 * H;
+        // A retired series: its stored value froze at the import, the sensor
+        // itself still changes. Not stuck, not too cold, nothing.
+        let mut retired = s(
+            1,
+            Source::Loxone,
+            Quantity::Temperature,
+            "T",
+            "Bedroom",
+            "°C",
+            &[(NOW - 6 * D, 1.0)],
+        );
+        retired.followed = false;
+        assert!(evaluate(&[retired.clone()], &up, NOW, &cfg).is_empty());
+        retired.followed = true;
+        let kinds: Vec<Kind> = evaluate(&[retired], &up, NOW, &cfg)
+            .iter()
+            .map(|w| w.kind)
+            .collect();
+        assert!(kinds.contains(&Kind::SensorStuck), "{kinds:?}");
+        // Nor does it count in its room's temperature.
+        let mut cold = s(
+            2,
+            Source::Loxone,
+            Quantity::Temperature,
+            "T2",
+            "Bedroom",
+            "°C",
+            &[(NOW - H, 10.0)],
+        );
+        cold.followed = false;
+        let warm = s(
+            3,
+            Source::Loxone,
+            Quantity::Temperature,
+            "T3",
+            "Bedroom",
+            "°C",
+            &[(NOW - H, 20.0)],
+        );
+        assert!(evaluate(&[cold, warm], &up, NOW, &cfg).is_empty());
     }
 }

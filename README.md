@@ -127,6 +127,11 @@ sends no notifications.
 
 Unknown keys are an error at startup.
 
+Only series haus receives live count. A retired Loxone series (`"-"` in
+`LOXONE_MAP`), an unmapped one, and every Loxone series before the
+Miniserver connection has mapped its states take no part in any warning:
+their stored value says nothing about now.
+
 ### Importing history
 
 ```sh

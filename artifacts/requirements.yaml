@@ -583,7 +583,9 @@ artifacts:
       Miniserver repeats the last value of a sensor that stopped sending (an
       empty battery), so without this rule an old value looks current and
       can raise a false warning. The value standing before the evaluation
-      window counts, however old.
+      window counts, however old. Only series the source follows live are
+      judged, by this and every other rule: a retired or unmapped Loxone
+      series keeps an old stored value while the sensor itself may change.
     fields:
       priority: must
       category: functional

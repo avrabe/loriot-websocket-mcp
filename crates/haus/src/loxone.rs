@@ -605,6 +605,12 @@ async fn session(state: &AppState, cfg: &LoxoneConfig) -> Result<(), BoxError> {
     for u in &res.unresolved {
         tracing::warn!("Loxone: unmapped series {u}");
     }
+    // What warnings may judge: only series that get live values.
+    *state
+        .loxone_followed
+        .write()
+        .unwrap_or_else(|e| e.into_inner()) =
+        Some(res.states.values().flatten().cloned().collect());
     if let Some(hint) = rights_hint(&structure, &wanted, &res.unresolved, &cfg.user) {
         tracing::warn!("{hint}");
     }
@@ -1403,6 +1409,12 @@ mod tests {
             log.contains("3 of 4 series mapped to states, 1 retired"),
             "{log}"
         );
+        // Warnings judge only what is followed live: the retired field is not.
+        let followed = st.loxone_followed.read().unwrap().clone().unwrap();
+        assert!(followed.contains(&(CTRL.to_string(), "Default".to_string())));
+        assert!(followed.contains(&(TRACKED.to_string(), "Default".to_string())));
+        assert!(!followed.contains(&(ROOM.to_string(), "HCm".to_string())));
+        assert_eq!(followed.len(), 3);
         let _ = std::fs::remove_file(&token_file);
     }
 
