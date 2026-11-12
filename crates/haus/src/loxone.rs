@@ -433,6 +433,34 @@ fn wanted_series(state: &AppState) -> Result<HashMap<(String, String), SeriesMet
         .collect())
 }
 
+/// When most series are missing because their controls are not in the
+/// structure file, and the file has fewer controls than haus has Loxone
+/// sensors, the likely cause is the user's rights: the Miniserver shows a
+/// user only the controls it may see. One line saying so beats a list of
+/// "not in the structure file".
+fn rights_hint(
+    structure: &serde_json::Value,
+    wanted: &[(String, String)],
+    unresolved: &[String],
+    user: &str,
+) -> Option<String> {
+    let missing = unresolved
+        .iter()
+        .filter(|u| u.contains("not in the structure file"))
+        .count();
+    let sensors: std::collections::HashSet<&str> = wanted.iter().map(|(u, _)| u.as_str()).collect();
+    let controls = structure["controls"].as_object().map_or(0, |c| c.len());
+    (missing > 0 && missing * 2 >= wanted.len() && controls < sensors.len()).then(|| {
+        format!(
+            "Loxone: the structure file for user {user:?} lists only {controls} control(s), \
+             but haus knows {} Loxone sensor(s). The Miniserver shows a user only the controls \
+             it may see: give {user:?} visualisation rights on these controls in Loxone Config, \
+             or use another user.",
+            sensors.len()
+        )
+    })
+}
+
 /// The HTTP(S) base of the Miniserver behind a `ws://` / `wss://` URL.
 fn http_base(ws_url: &str) -> Result<String, BoxError> {
     let u = ws_url.trim_end_matches('/');
@@ -527,6 +555,9 @@ async fn session(state: &AppState, cfg: &LoxoneConfig) -> Result<(), BoxError> {
     );
     for u in &res.unresolved {
         tracing::warn!("Loxone: unmapped series {u}");
+    }
+    if let Some(hint) = rights_hint(&structure, &wanted, &res.unresolved, &cfg.user) {
+        tracing::warn!("{hint}");
     }
 
     c.request(&Cmd::EnableStatusUpdates, None).await?;
@@ -1215,6 +1246,35 @@ mod tests {
         assert_eq!(backoff_delay(&c, u32::MAX), Duration::from_secs(300));
         assert_eq!(c.keepalive, Duration::from_secs(60));
         assert!(c.silence > c.keepalive * 2 && c.silence < Duration::from_secs(300));
+    }
+
+    #[test]
+    fn a_rights_filtered_structure_file_is_named_as_such() {
+        let wanted: Vec<(String, String)> = (0..5)
+            .map(|i| {
+                (
+                    format!("0e000000-0000-0000-00000000000000{i:02}"),
+                    "Default".into(),
+                )
+            })
+            .collect();
+        let only_one = json!({"controls": {"x": {"uuidAction": "x", "states": {"input": "y"}}}});
+        let res = resolve_states(&only_one, &wanted, &HashMap::new());
+        assert_eq!(res.states.len(), 0);
+        let hint = rights_hint(&only_one, &wanted, &res.unresolved, "haus").expect("a hint");
+        assert!(
+            hint.contains("only 1 control") && hint.contains("visualisation rights"),
+            "{hint}"
+        );
+        // A full structure with one stray series: no hint.
+        let full = structure();
+        let mixed: Vec<(String, String)> = vec![
+            (CTRL.into(), "Default".into()),
+            (ROOM.into(), "Default".into()),
+            (UNKNOWN.into(), "Default".into()),
+        ];
+        let res = resolve_states(&full, &mixed, &HashMap::new());
+        assert!(rights_hint(&full, &mixed, &res.unresolved, "haus").is_none());
     }
 
     #[test]
