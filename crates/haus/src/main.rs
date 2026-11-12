@@ -38,6 +38,8 @@ Environment:
                    turns the Loxone source on)
   LOXONE_USER, LOXONE_PASSWORD   Miniserver user (required with LOXONE_URL)
   LOXONE_TOKEN_FILE  where the Miniserver token is kept (default loxone-token.json)
+  LOXONE_KEY_SHA256  SHA-256 of the Miniserver's public key; a different key is
+                   refused before any login (without it: trust on first use)
   LOXONE_MAP       optional JSON file {\"<uuid>/<field>\": \"<state name or uuid>\"}
   BIND             listen address (falls back to HOST, default 0.0.0.0)
   PORT             listen port (default 3000)
@@ -369,6 +371,43 @@ mod tests {
             assert!(f.contains("tungstenite=warn"), "{env:?}: {f}");
             assert!(f.contains("tokio_tungstenite=warn"), "{env:?}: {f}");
             assert!(!f.contains("tungstenite=trace"), "{env:?}: {f}");
+        }
+    }
+
+    /// Every environment variable the binary reads is documented in --help.
+    /// Derived from the sources, so a new variable cannot be forgotten.
+    #[test]
+    fn help_lists_every_environment_variable() {
+        let sources = [
+            include_str!("main.rs"),
+            include_str!("loxone.rs"),
+            include_str!("websocket.rs"),
+            include_str!("state.rs"),
+            include_str!("api.rs"),
+            include_str!("dashboard.rs"),
+            include_str!("import_cmd.rs"),
+            include_str!("compare_cmd.rs"),
+        ];
+        let mut read = std::collections::BTreeSet::new();
+        for src in sources {
+            let mut rest = src;
+            while let Some(i) = rest.find("var(\"") {
+                rest = &rest[i + 5..];
+                let name: String = rest
+                    .chars()
+                    .take_while(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || *c == '_')
+                    .collect();
+                if name.len() > 2 && rest[name.len()..].starts_with('"') {
+                    read.insert(name);
+                }
+            }
+        }
+        assert!(read.len() >= 10, "found only {read:?}");
+        for name in &read {
+            assert!(
+                USAGE.contains(name.as_str()),
+                "--help does not mention {name}"
+            );
         }
     }
 
