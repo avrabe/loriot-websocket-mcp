@@ -146,6 +146,35 @@ pub fn set_base_path(base: &str) {
     let _ = BASE_PATH.set(base.to_string());
 }
 
+/// The nav v1 switcher's HTML (`HAUS_NAV`, REQ-UI-009); empty when unset,
+/// so a page is unchanged.
+static NAV_HTML: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+/// Read and check `HAUS_NAV` with `HAUS_NAV_SELF`; set once at startup.
+/// Both unset: no switcher. One without the other, or a file that fails
+/// the contract: an error naming what is wrong.
+pub fn load_nav(file: Option<&str>, me: Option<&str>) -> Result<(), String> {
+    let html = nav_html(file, me)?;
+    let _ = NAV_HTML.set(html);
+    Ok(())
+}
+
+fn nav_html(file: Option<&str>, me: Option<&str>) -> Result<String, String> {
+    Ok(
+        match (file.filter(|s| !s.is_empty()), me.filter(|s| !s.is_empty())) {
+            (None, None) => String::new(),
+            (Some(_), None) => return Err("HAUS_NAV is set but HAUS_NAV_SELF is not".into()),
+            (None, Some(_)) => return Err("HAUS_NAV_SELF is set but HAUS_NAV is not".into()),
+            (Some(f), Some(me)) => {
+                let json = std::fs::read_to_string(f).map_err(|e| format!("HAUS_NAV {f}: {e}"))?;
+                let nav =
+                    haus_core::nav::parse(&json, me).map_err(|e| format!("HAUS_NAV {f}: {e}"))?;
+                haus_core::nav::render(&nav, me, esc)
+            }
+        },
+    )
+}
+
 fn base_href() -> String {
     format!("{}/", BASE_PATH.get().map(String::as_str).unwrap_or(""))
 }
@@ -178,8 +207,17 @@ pub fn parse_base_path(v: Option<&str>) -> Result<String, String> {
 }
 
 fn page(title: &str, body: &str) -> Html<String> {
+    page_with_nav(
+        title,
+        body,
+        NAV_HTML.get().map(String::as_str).unwrap_or(""),
+    )
+}
+
+fn page_with_nav(title: &str, body: &str, nav: &str) -> Html<String> {
     Html(
         PAGE.replace("{{BASE}}", &esc(&base_href()))
+            .replace("{{NAV}}", nav)
             .replace("{{TITLE}}", &esc(title))
             .replace("{{VERSION}}", env!("CARGO_PKG_VERSION"))
             .replace("{{BODY}}", body),
@@ -962,6 +1000,67 @@ mod tests {
                 assert!(!html.contains(attr), "{attr} in {html}");
             }
         }
+    }
+
+    // rivet: verifies REQ-UI-009
+    // rivet: verifies DD-016
+    #[test]
+    fn the_app_switcher_renders_exactly_the_file_and_nothing_when_unset() {
+        let dir = std::env::temp_dir().join(format!("haus-nav-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("nav.json");
+        std::fs::write(
+            &f,
+            r#"{"version": 1, "home": {"name": "host", "url": "/"},
+                "apps": [{"id": "warte", "name": "warte", "url": "/warte/"},
+                         {"id": "haus", "name": "haus", "url": "/haus/", "desc": "Climate"}]}"#,
+        )
+        .unwrap();
+        let fs = f.to_str().unwrap();
+        // Unset: the page is byte-identical to the template without a switcher.
+        assert_eq!(nav_html(None, None).unwrap(), "");
+        let plain = page_with_nav("t", "b", "").0;
+        assert_eq!(plain, page("t", "b").0);
+        assert!(!plain.contains("apps") && !plain.contains("{{NAV}}"));
+        // Set: 1 + apps links, as given (site-absolute, not against the base).
+        let nav = nav_html(Some(fs), Some("haus")).unwrap();
+        let html = page_with_nav("t", "b", &nav).0;
+        let start = html.find(r#"<nav class="apps">"#).unwrap();
+        let block = &html[start..start + html[start..].find("</nav>").unwrap()];
+        let hrefs: Vec<&str> = block
+            .split("href=\"")
+            .skip(1)
+            .map(|r| r.split('"').next().unwrap())
+            .collect();
+        assert_eq!(hrefs, vec!["/", "/warte/", "/haus/"], "{block}");
+        assert!(
+            block.contains(r#"href="/haus/" aria-current="page" title="Climate">haus</a>"#),
+            "{block}"
+        );
+        // Outside the switcher no link leaves the base path.
+        let rest = html
+            .replacen(block, "", 1)
+            .replacen(r#"<base href="/">"#, "", 1);
+        assert!(!rest.contains("href=\"/"), "{rest}");
+        // Half a configuration, or a file that breaks the contract: refused.
+        assert!(nav_html(Some(fs), None)
+            .unwrap_err()
+            .contains("HAUS_NAV_SELF"));
+        assert!(nav_html(None, Some("haus"))
+            .unwrap_err()
+            .contains("HAUS_NAV"));
+        assert!(nav_html(Some(fs), Some("photos"))
+            .unwrap_err()
+            .contains("self"));
+        std::fs::write(
+            &f,
+            r#"{"version": 2, "home": {"name": "h", "url": "/"}, "apps": []}"#,
+        )
+        .unwrap();
+        assert!(nav_html(Some(fs), Some("haus"))
+            .unwrap_err()
+            .contains("version"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     fn app(state: AppState) -> axum::Router {

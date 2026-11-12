@@ -308,6 +308,25 @@ artifacts:
       - type: traces-to
         target: REQ-UI-001
 
+  - id: REQ-UI-009
+    type: requirement
+    title: Home link and app switcher (nav v1)
+    status: implemented
+    release: v0.4.0
+    description: >
+      With HAUS_NAV (a nav v1 JSON file, the contract shared with warte:
+      `warte docs nav`) and HAUS_NAV_SELF (haus's id in it) set, every page
+      header shows a link home and one link per app in file order, haus's
+      own marked aria-current, exactly 1 + apps links, URLs as given. A file
+      that breaks the contract, or only one of the two settings, stops
+      startup naming the field. Unset, pages are unchanged.
+    fields:
+      priority: should
+      category: functional
+    links:
+      - type: traces-to
+        target: REQ-UI-001
+
   # --- Release and retirement ---
   - id: REQ-DEPLOY-001
     type: requirement

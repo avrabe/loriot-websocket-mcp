@@ -56,3 +56,8 @@ tr.stale td { color: var(--stale); }
 .room.warned { border-color: var(--warn); }
 .warn { color: var(--warn); font-size: .85rem; list-style: none; padding: .15rem 0; }
 .warnings { list-style: none; margin-bottom: 1rem; }
+/* nav v1: home link and app switcher (HAUS_NAV) */
+nav.apps { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-left: auto; font-size: 13px; }
+nav.apps a { color: var(--dim, inherit); text-decoration: none; }
+nav.apps a:hover { text-decoration: underline; }
+nav.apps a[aria-current="page"] { color: inherit; font-weight: 600; }

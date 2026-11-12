@@ -416,3 +416,32 @@ artifacts:
     links:
       - type: satisfies
         target: REQ-UI-008
+
+  - id: DD-016
+    type: design-decision
+    title: App switcher from a shared nav v1 file, contract owned by warte
+    status: implemented
+    release: v0.4.0
+    description: >
+      haus reads the operator's nav v1 file once at startup and renders it
+      into the page header; the contract text lives in warte.
+    fields:
+      decision: >
+        haus_core::nav parses and checks the file exactly as warte's contract
+        says (version 1, no unknown keys, name/id/url/desc limits, 1 to 20
+        apps, self among the ids) and renders "← home" plus every app, the
+        own entry as a link with aria-current. The HTML is built once at
+        startup and inserted at a {{NAV}} mark in the page template; unset,
+        the mark becomes empty and the page is unchanged. URLs are
+        site-absolute or https and are written as given, so the <base href>
+        of the path prefix does not affect them.
+      rationale: >
+        One file for every app on the host, written by the operator from the
+        same list as the landing page; identical checks in both apps mean a
+        file works everywhere or nowhere.
+      alternatives: >
+        Links from environment variables per app; a switcher served by the
+        reverse proxy (needs response rewriting).
+    links:
+      - type: satisfies
+        target: REQ-UI-009
