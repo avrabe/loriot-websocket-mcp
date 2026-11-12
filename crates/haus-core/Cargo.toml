@@ -1,8 +1,8 @@
 [package]
-name = "loriot-core"
+name = "haus-core"
 version.workspace = true
 edition.workspace = true
-description = "Core types and logic for LoRaWAN sensor monitoring"
+description = "Core types and logic for haus: sensor decoding, storage, analytics"
 license.workspace = true
 
 [features]
@@ -26,5 +26,3 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 zip = { version = "2.2", default-features = false, features = ["deflate"], optional = true }
 tokio = { version = "1", features = ["sync"], optional = true }
 
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-js-sys = "0.3"

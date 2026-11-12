@@ -1,6 +1,6 @@
 //! Shared application state
 
-use loriot_core::{AppConfig, ConnectionStatus, DiskReader, SensorReading, StorageManager};
+use haus_core::{AppConfig, ConnectionStatus, DiskReader, SensorReading, StorageManager};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::Arc;
@@ -98,7 +98,7 @@ impl AppState {
     /// Add a new reading and broadcast to subscribers. The in-memory update
     /// happens under the storage lock; the file append runs afterwards on a
     /// blocking thread, with the lock released.
-    pub async fn add_reading(&self, reading: SensorReading) -> loriot_core::Result<bool> {
+    pub async fn add_reading(&self, reading: SensorReading) -> haus_core::Result<bool> {
         let (line, disk) = {
             let mut storage = self.storage.write().await;
             (storage.insert_reading(reading.clone())?, storage.disk())
@@ -125,7 +125,7 @@ impl AppState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use loriot_core::StorageConfig;
+    use haus_core::StorageConfig;
 
     fn reading(ts: u64) -> SensorReading {
         serde_json::from_str(&format!(

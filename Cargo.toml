@@ -1,13 +1,8 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/loriot-core",
-    "crates/loriot-server",
-    "crates/loriot-web",
-]
-default-members = [
-    "crates/loriot-core",
-    "crates/loriot-server",
+    "crates/haus-core",
+    "crates/haus",
 ]
 
 [workspace.package]

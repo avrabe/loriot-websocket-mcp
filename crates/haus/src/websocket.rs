@@ -9,7 +9,7 @@
 
 use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
-use loriot_core::{
+use haus_core::{
     decode_lht65s_pir, sensors::dragino::create_sensor_reading, ConnectionStatus, SensorReading,
 };
 use serde::Deserialize;
@@ -283,7 +283,7 @@ mod tests {
     //! silent upstream within a bounded time, reconnect, and never starve the
     //! runtime. All tests use a local plain-`ws://` server and a dummy token.
     use super::*;
-    use loriot_core::{AppConfig, StorageConfig, StorageManager};
+    use haus_core::{AppConfig, StorageConfig, StorageManager};
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;

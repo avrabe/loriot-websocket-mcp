@@ -16,10 +16,6 @@ env:
   CARGO_TERM_COLOR: always
   # Keep in step with release.yml.
   RUST_TOOLCHAIN: 1.96.1
-  # Keep in step with release.yml.
-  TRUNK_VERSION: 0.22.1
-  TRUNK_SHA256: 2ab8d548fd5ed9cda50906f61fd8654204e7893bd52ebbfd90533862b7d71ee1
-  NODE_VERSION: 22
   # varve itself; the tools (rivet) come from the layer varve.toml pins.
   VARVE_VERSION: v0.47.0
 
@@ -47,62 +43,17 @@ jobs:
       - name: cargo clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
-      # loriot-core on its own, without the async/blocking HTTP features (as the
-      # wasm frontend uses it); the workspace run above unifies those features on.
-      - name: cargo clippy (loriot-core, no features)
-        run: cargo clippy -p loriot-core --all-targets --locked -- -D warnings
+      # The workspace no longer enables haus-core's weather HTTP features
+      # (async, blocking); lint and test them here so that code keeps building
+      # until the weather page returns (REQ-UI-005).
+      - name: cargo clippy (haus-core, all features)
+        run: cargo clippy -p haus-core --all-targets --all-features --locked -- -D warnings
+
+      - name: cargo test (haus-core, all features)
+        run: cargo test -p haus-core --all-features --locked
 
       - name: cargo test
         run: cargo test --workspace --locked
-
-  # Same dashboard build as the release, so a broken trunk/tailwind build is
-  # caught on the PR rather than at tag time.
-  web:
-    name: web (trunk build)
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch
-        with:
-          toolchain: ${{ env.RUST_TOOLCHAIN }}
-          targets: wasm32-unknown-unknown
-          components: clippy
-
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-
-      - name: npm ci and audit
-        run: |
-          npm ci
-          npm audit --audit-level=moderate
-
-      - name: Install trunk
-        run: |
-          curl -fsSL -o "$RUNNER_TEMP/trunk.tar.gz" \
-            "https://github.com/trunk-rs/trunk/releases/download/v${TRUNK_VERSION}/trunk-x86_64-unknown-linux-gnu.tar.gz"
-          echo "${TRUNK_SHA256}  $RUNNER_TEMP/trunk.tar.gz" | sha256sum -c -
-          mkdir -p "$RUNNER_TEMP/trunk"
-          tar -xzf "$RUNNER_TEMP/trunk.tar.gz" -C "$RUNNER_TEMP/trunk"
-          echo "$RUNNER_TEMP/trunk" >> "$GITHUB_PATH"
-
-      - name: cargo clippy (loriot-web, wasm32)
-        run: cargo clippy -p loriot-web --target wasm32-unknown-unknown --locked -- -D warnings
-
-      - name: trunk build --release
-        working-directory: crates/loriot-web
-        run: |
-          trunk --version
-          trunk build --release --locked
-          test -s ../../assets/index.html
-          ls ../../assets/*.wasm ../../assets/*.js ../../assets/*.css
 
   # Traceability: rivet from the varve layer this repo pins (varve.toml), so CI
   # validates with exactly the rivet a developer gets. varve is installed from

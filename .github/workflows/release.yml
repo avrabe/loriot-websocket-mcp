@@ -1,12 +1,11 @@
 name: Release
 
 # Assets (PulseEngine release standard, the names deployment tooling checks):
-#   loriot-server-<ver>-linux-arm64    raw static binary, aarch64 musl (Raspberry Pi)
-#   loriot-server-<ver>-linux-amd64    raw static binary, x86_64 musl
-#   loriot-server-<ver>-macos-arm64   raw binary, Apple silicon
-#   loriot-web-<ver>-assets.tar.gz    the dashboard (trunk build); unpack into the
-#                                      server's working directory -> ./assets/
-#   sbom.json                          CycloneDX SBOM of loriot-server
+#   haus-<ver>-linux-arm64             raw static binary, aarch64 musl (Raspberry Pi)
+#   haus-<ver>-linux-amd64             raw static binary, x86_64 musl
+#   haus-<ver>-macos-arm64             raw binary, Apple silicon
+#   sbom.json                          CycloneDX SBOM of haus
+# The dashboard is part of the binary; there is no separate assets archive.
 #   SHA256SUMS.txt                     sha256 of all of the above
 #   SHA256SUMS.txt.cosign.bundle       keyless cosign signature over SHA256SUMS.txt
 # plus a GitHub build-provenance attestation for each binary.
@@ -29,11 +28,6 @@ env:
   RUST_TOOLCHAIN: 1.96.1
   CARGO_ZIGBUILD_VERSION: 0.24.1
   CARGO_CYCLONEDX_VERSION: 0.5.9
-  # trunk release binary for x86_64 Linux, checked against the sha256 the
-  # trunk project publishes next to it. Keep in step with ci.yml.
-  TRUNK_VERSION: 0.22.1
-  TRUNK_SHA256: 2ab8d548fd5ed9cda50906f61fd8654204e7893bd52ebbfd90533862b7d71ee1
-  NODE_VERSION: 22
   TAG: ${{ github.ref_name }}
 
 # Release jobs sign and publish: GitHub-hosted runners only, and no caches.
@@ -54,9 +48,9 @@ jobs:
       - name: Compare tag and crate version
         run: |
           crate="$(cargo metadata --no-deps --format-version 1 --locked \
-            | jq -r '.packages[] | select(.name == "loriot-server") | .version')"
+            | jq -r '.packages[] | select(.name == "haus") | .version')"
           if [ "v$crate" != "$TAG" ]; then
-            echo "::error::tag $TAG does not match loriot-server version $crate"
+            echo "::error::tag $TAG does not match haus version $crate"
             exit 1
           fi
 
@@ -106,11 +100,11 @@ jobs:
 
       - name: Build (zigbuild)
         if: matrix.zig
-        run: cargo zigbuild --locked --release -p loriot-server --target "${{ matrix.target }}"
+        run: cargo zigbuild --locked --release -p haus --target "${{ matrix.target }}"
 
       - name: Build (native)
         if: ${{ !matrix.zig }}
-        run: cargo build --locked --release -p loriot-server --target "${{ matrix.target }}"
+        run: cargo build --locked --release -p haus --target "${{ matrix.target }}"
 
       - name: Install qemu-user (to run the arm64 binary)
         if: matrix.run == 'qemu-aarch64-static'
@@ -119,10 +113,10 @@ jobs:
       # Ask the artifact, not the manifest: the built binary must report the tag.
       - name: Check binary --version equals tag
         run: |
-          bin="target/${{ matrix.target }}/release/loriot-server"
+          bin="target/${{ matrix.target }}/release/haus"
           got="$(${{ matrix.run }} "$bin" --version)"
-          if [ "$got" != "loriot-server ${TAG#v}" ]; then
-            echo "::error::binary reports '$got', expected 'loriot-server ${TAG#v}'"
+          if [ "$got" != "haus ${TAG#v}" ]; then
+            echo "::error::binary reports '$got', expected 'haus ${TAG#v}'"
             exit 1
           fi
           ${{ matrix.run }} "$bin" --help > /dev/null
@@ -130,12 +124,12 @@ jobs:
       - name: Check linkage
         if: matrix.zig
         run: |
-          file "target/${{ matrix.target }}/release/loriot-server" | tee /dev/stderr | grep -q 'statically linked'
+          file "target/${{ matrix.target }}/release/haus" | tee /dev/stderr | grep -q 'statically linked'
 
       - name: Stage binary
         run: |
           mkdir -p dist
-          cp "target/${{ matrix.target }}/release/loriot-server" "dist/loriot-server-${TAG#v}-${{ matrix.asset }}"
+          cp "target/${{ matrix.target }}/release/haus" "dist/haus-${TAG#v}-${{ matrix.asset }}"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -162,10 +156,10 @@ jobs:
 
       - name: Generate SBOM
         run: |
-          cargo cyclonedx --manifest-path crates/loriot-server/Cargo.toml \
+          cargo cyclonedx --manifest-path crates/haus/Cargo.toml \
             --format json --spec-version 1.5 --override-filename sbom
           mkdir -p dist
-          cp crates/loriot-server/sbom.json dist/sbom.json
+          cp crates/haus/sbom.json dist/sbom.json
           test -s dist/sbom.json
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -174,64 +168,9 @@ jobs:
           path: dist/sbom.json
           if-no-files-found: error
 
-  web:
-    name: Web assets
-    needs: version-guard
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch
-        with:
-          toolchain: ${{ env.RUST_TOOLCHAIN }}
-          targets: wasm32-unknown-unknown
-
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          package-manager-cache: false
-
-      - name: Install npm dependencies (tailwind)
-        run: npm ci
-
-      - name: Install trunk
-        run: |
-          curl -fsSL -o "$RUNNER_TEMP/trunk.tar.gz" \
-            "https://github.com/trunk-rs/trunk/releases/download/v${TRUNK_VERSION}/trunk-x86_64-unknown-linux-gnu.tar.gz"
-          echo "${TRUNK_SHA256}  $RUNNER_TEMP/trunk.tar.gz" | sha256sum -c -
-          mkdir -p "$RUNNER_TEMP/trunk"
-          tar -xzf "$RUNNER_TEMP/trunk.tar.gz" -C "$RUNNER_TEMP/trunk"
-          echo "$RUNNER_TEMP/trunk" >> "$GITHUB_PATH"
-
-      - name: Build dashboard
-        working-directory: crates/loriot-web
-        run: |
-          trunk --version
-          trunk build --release --locked
-
-      - name: Package assets
-        run: |
-          test -s assets/index.html
-          ls assets/*.wasm assets/*.js assets/*.css
-          mkdir -p dist
-          tar --sort=name --owner=0 --group=0 --numeric-owner \
-            --exclude='.trunk-lock' --exclude='.stage' \
-            -czf "dist/loriot-web-${TAG#v}-assets.tar.gz" assets
-          tar -tzf "dist/loriot-web-${TAG#v}-assets.tar.gz"
-
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: web-assets
-          path: dist/
-          if-no-files-found: error
-
   publish:
     name: Sum, sign, attest, release
-    needs: [build, sbom, web]
+    needs: [build, sbom]
     runs-on: ubuntu-24.04
     permissions:
       contents: write       # create the release
@@ -248,17 +187,16 @@ jobs:
         run: |
           v="${TAG#v}"
           for a in linux-arm64 linux-amd64 macos-arm64; do
-            test -s "loriot-server-$v-$a"
+            test -s "haus-$v-$a"
           done
-          test -s "loriot-web-$v-assets.tar.gz"
           test -s sbom.json
-          sha256sum loriot-server-* "loriot-web-$v-assets.tar.gz" sbom.json > SHA256SUMS.txt
+          sha256sum haus-* sbom.json > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
       - name: Attest build provenance
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
-          subject-path: dist/loriot-*
+          subject-path: dist/haus-*
 
       - name: Install cosign
         uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
@@ -283,5 +221,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          gh release create "$TAG" --verify-tag --title "loriot-server ${TAG#v}" --generate-notes \
-            loriot-server-* loriot-web-*-assets.tar.gz sbom.json SHA256SUMS.txt SHA256SUMS.txt.cosign.bundle
+          gh release create "$TAG" --verify-tag --title "haus ${TAG#v}" --generate-notes \
+            haus-* sbom.json SHA256SUMS.txt SHA256SUMS.txt.cosign.bundle

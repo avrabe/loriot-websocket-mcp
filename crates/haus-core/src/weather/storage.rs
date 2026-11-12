@@ -274,13 +274,13 @@ mod tests {
 
         let record = WeatherRecord {
             station_id: "05717".to_string(),
-            station_name: "Bochum".to_string(),
+            station_name: "Teststation".to_string(),
             station_coordinates: Coordinates::new(51.4, 7.2),
             distance_km: 5.0,
             weather: DailyWeather {
                 date: "20241201".to_string(),
                 station_id: "05717".to_string(),
-                station_name: Some("Bochum".to_string()),
+                station_name: Some("Teststation".to_string()),
                 temp_mean: Some(5.0),
                 temp_max: Some(8.0),
                 temp_min: Some(2.0),

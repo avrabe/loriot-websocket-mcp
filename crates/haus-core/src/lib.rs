@@ -1,4 +1,4 @@
-//! Core types and logic for LoRaWAN sensor monitoring
+//! Core types and logic for haus
 //!
 //! This crate provides shared types and functionality for:
 //! - Sensor data structures and decoding (Dragino LHT65S-PIR)
@@ -8,19 +8,12 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-/// Get current timestamp in milliseconds (platform-independent)
-#[cfg(not(target_arch = "wasm32"))]
+/// Current time in milliseconds since the Unix epoch.
 pub fn current_timestamp_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_millis() as u64
-}
-
-/// Get current timestamp in milliseconds (WASM version)
-#[cfg(target_arch = "wasm32")]
-pub fn current_timestamp_ms() -> u64 {
-    js_sys::Date::now() as u64
 }
 
 pub mod analytics;

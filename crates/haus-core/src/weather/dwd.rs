@@ -459,7 +459,9 @@ mod tests {
         let indices = DwdColumnIndices::default();
 
         let line = "5717;20240521;-999;-999;-999;10;73.5;4;-999;-999;-999;15.3;-999;15.2;90.00;23.1;9.9;7.1;eor";
-        let record = fetcher.parse_line(line, &indices, Some("Bochum")).unwrap();
+        let record = fetcher
+            .parse_line(line, &indices, Some("Teststation"))
+            .unwrap();
 
         assert_eq!(record.station_id, "5717");
         assert_eq!(record.date, "20240521");

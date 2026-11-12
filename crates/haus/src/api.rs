@@ -5,7 +5,7 @@ use axum::{
     http::StatusCode,
     Json,
 };
-use loriot_core::{AnalyticsEngine, DeviceStats, DiskReader, SensorReading, TimeWindow};
+use haus_core::{AnalyticsEngine, DeviceStats, DiskReader, SensorReading, TimeWindow};
 use serde::{Deserialize, Serialize};
 
 use crate::state::run_blocking;
@@ -216,7 +216,7 @@ pub async fn get_device_stats(
 pub async fn get_analytics(
     State(state): State<AppState>,
     Query(query): Query<ReadingsQuery>,
-) -> Json<loriot_core::AnalyticsReport> {
+) -> Json<haus_core::AnalyticsReport> {
     let disk = state.disk().await;
     Json(run_blocking(move || analytics_from_disk(&disk, &query, None)).await)
 }
@@ -226,7 +226,7 @@ fn analytics_from_disk(
     disk: &DiskReader,
     query: &ReadingsQuery,
     eui: Option<&str>,
-) -> loriot_core::AnalyticsReport {
+) -> haus_core::AnalyticsReport {
     // Use explicit time range if provided, otherwise use time_window
     let readings = if let (Some(start), Some(end)) = (query.start_ts, query.end_ts) {
         disk.read_in_range(start, end, eui).unwrap_or_default()
@@ -245,7 +245,7 @@ pub async fn get_device_analytics(
     State(state): State<AppState>,
     Path(eui): Path<String>,
     Query(query): Query<ReadingsQuery>,
-) -> Json<loriot_core::AnalyticsReport> {
+) -> Json<haus_core::AnalyticsReport> {
     let disk = state.disk().await;
     Json(run_blocking(move || analytics_from_disk(&disk, &query, Some(&eui))).await)
 }
@@ -255,7 +255,7 @@ mod tests {
     //! The runtime must stay responsive while a handler reads the whole JSONL
     //! history from disk (the file grows without bound on a long-running box).
     use super::*;
-    use loriot_core::{AppConfig, StorageConfig, StorageManager};
+    use haus_core::{AppConfig, StorageConfig, StorageManager};
     use std::collections::HashMap;
     use std::io::Write;
     use std::sync::atomic::{AtomicBool, Ordering};
