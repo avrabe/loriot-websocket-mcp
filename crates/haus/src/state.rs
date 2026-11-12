@@ -59,6 +59,9 @@ pub struct Sources {
     pub loxone: Option<UpstreamHealth>,
 }
 
+/// Series keys (source id, field) a source follows live.
+pub type FollowedKeys = std::collections::HashSet<(String, String)>;
+
 /// Shared application state accessible by all handlers
 #[derive(Clone)]
 pub struct AppState {
@@ -80,6 +83,10 @@ pub struct AppState {
     pub ingest: Arc<Ingestor>,
     /// Warning thresholds (HAUS_WARNINGS, else defaults).
     pub warn: Arc<haus_core::warn::WarnConfig>,
+    /// The Loxone series keys (control uuid, field) the Miniserver connection
+    /// follows live; `None` until it has mapped them. Retired and unmapped
+    /// series are not in it.
+    pub loxone_followed: Arc<std::sync::RwLock<Option<FollowedKeys>>>,
 }
 
 impl AppState {
@@ -103,6 +110,7 @@ impl AppState {
             sources: Arc::new(sources),
             ingest,
             warn: Arc::new(haus_core::warn::WarnConfig::default()),
+            loxone_followed: Arc::new(std::sync::RwLock::new(None)),
         }
     }
 

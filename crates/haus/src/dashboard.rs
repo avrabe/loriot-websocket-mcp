@@ -484,6 +484,12 @@ pub async fn warnings(state: &AppState) -> Vec<Warning> {
     let lv = live(state);
     let result = run_blocking(move || -> Result<Vec<Warning>, String> {
         let store = s.ingest.store();
+        let followed = s
+            .loxone_followed
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+            .unwrap_or_default();
         let mut data = Vec::new();
         for (id, meta) in store.series().map_err(|e| e.to_string())? {
             // The window, and the value standing at its start (however old:
@@ -495,11 +501,18 @@ pub async fn warnings(state: &AppState) -> Vec<Warning> {
                 .into_iter()
                 .collect();
             recent.extend(store.range(id, from, now).map_err(|e| e.to_string())?);
+            let live = match meta.key.source {
+                haus_core::store::Source::Loriot => true,
+                haus_core::store::Source::Loxone => {
+                    followed.contains(&(meta.key.source_id.clone(), meta.key.field.clone()))
+                }
+            };
             data.push(warn::SeriesData {
                 id,
                 latest: recent.last().copied(),
                 meta,
                 recent,
+                followed: live,
             });
         }
         let mut sources = vec![(haus_core::store::Source::Loriot, lv.loriot)];
@@ -1012,6 +1025,13 @@ mod tests {
                 },
             ])
             .unwrap();
+        // Not followed live yet (no Miniserver mapping): no judgement at all.
+        assert!(warnings(&state)
+            .await
+            .iter()
+            .all(|w| w.kind != Kind::SensorStuck));
+        *state.loxone_followed.write().unwrap() =
+            Some([(meta.key.source_id.clone(), meta.key.field.clone())].into());
         let w = warnings(&state).await;
         let stuck: Vec<_> = w.iter().filter(|w| w.kind == Kind::SensorStuck).collect();
         assert_eq!(stuck.len(), 1, "{w:?}");
