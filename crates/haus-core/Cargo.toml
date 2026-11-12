@@ -24,6 +24,18 @@ urlencoding = "2.1"
 redb = "4.5"
 # Stats4Lox export files are gzip (REQ-IMPORT-002)
 flate2 = "1"
+# Loxone Miniserver protocol (REQ-LOX-001, DD-004). The 0.9/0.8/0.12
+# generation: the 0.10 line reworked its API. RSA is used only to encrypt
+# with the Miniserver's public key, so RUSTSEC-2023-0071 (a timing leak in
+# decryption) does not apply.
+rsa = "0.9"
+aes = "0.8"
+cbc = { version = "0.1", features = ["alloc"] }
+hmac = "0.12"
+sha1 = "0.10"
+sha2 = "0.10"
+base64 = "0.22"
+rand = "0.8"
 
 # Optional dependencies for weather module
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"], optional = true }

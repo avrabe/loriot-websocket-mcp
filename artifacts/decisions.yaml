@@ -89,15 +89,25 @@ artifacts:
   - id: DD-004
     type: design-decision
     title: Live Loxone data straight from the Miniserver websocket
-    status: approved
+    status: implemented
     description: >
       Live Loxone values come from the Miniserver websocket directly, not from a logger in between.
     release: v0.4.0
     fields:
       decision: >
-        haus speaks the Miniserver websocket protocol itself (token auth,
-        enablebinstatusupdate, value-event tables keyed by UUID). Token
-        acquisition (getkey2, getjwt) follows the client in avrabe/mcp-loxone.
+        haus speaks the Miniserver websocket protocol itself, after Loxone's
+        "Communicating with the Loxone Miniserver" V17.0 (31.3.2026): RSA key
+        exchange and an AES-256-CBC session, token authentication (getkey2,
+        getjwt with permission 4, authwithtoken, refreshjwt) with the token
+        kept in a 0600 file, the structure file, enablebinstatusupdate, and
+        value-event tables keyed by UUID. Token commands are always sent
+        encrypted: V17.0 says getjwt must be (unencrypted is declined with 400)
+        and also that encryption is optional since 11.2 with TLS; encrypting
+        works either way. Series map to state UUIDs through the structure
+        file: field Default is the control's `value` state; other fields
+        (e.g. a room controller's outputs) through a LOXONE_MAP override file.
+        RSA uses the rsa 0.9 crate for encryption only, so RUSTSEC-2023-0071
+        (a timing leak in decryption) does not apply.
       rationale: >
         Reading the Miniserver directly needs no logger (LoxBerry with
         Stats4Lox and InfluxDB) between it and haus, and gives every change
@@ -273,7 +283,7 @@ artifacts:
   - id: DD-012
     type: design-decision
     title: The Miniserver client sends only an allow-listed set of commands
-    status: approved
+    status: implemented
     release: v0.4.0
     description: >
       Every command the Loxone client can send is a constant in one list
@@ -283,7 +293,12 @@ artifacts:
     fields:
       decision: >
         The client has no API that takes a free-form command string. A test
-        asserts the set of commands it can emit equals the allow-list.
+        asserts the set of commands it can emit equals the allow-list. The
+        Miniserver's public key is pinned (LOXONE_KEY_SHA256, else trusted on
+        first use and remembered in the token file); a different key is
+        refused before anything derived from the credentials is sent, so a
+        host on a plain ws:// path cannot read the session and relay or
+        brute-force the login.
       rationale: >
         Reading needs only the handful of session commands; making anything
         else unrepresentable is cheaper to check than reviewing every call

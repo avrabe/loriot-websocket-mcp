@@ -34,6 +34,12 @@ LORIOT_WS_TOKEN=... BIND=127.0.0.1 PORT=3000 ./haus
 | Variable          | Default                        | Meaning |
 |-------------------|--------------------------------|---------|
 | `LORIOT_WS_TOKEN` | (required)                     | LORIOT application token |
+| `HAUS_STORE`      | `haus.redb`                    | the time-series store (all series of all sources) |
+| `LOXONE_URL`      | (unset: Loxone off)            | `ws://host[:port]` or `wss://host[:port]` of a Loxone Miniserver |
+| `LOXONE_USER`, `LOXONE_PASSWORD` | (required with `LOXONE_URL`) | a Miniserver user; read only from the environment |
+| `LOXONE_TOKEN_FILE` | `loxone-token.json`          | where the Miniserver token is kept (written with mode 0600) |
+| `LOXONE_MAP`      | (none)                         | JSON `{"<control uuid>/<field>": "<state name or state uuid>"}` for fields other than `Default` |
+| `LOXONE_KEY_SHA256` | (trust on first use)         | SHA-256 of the Miniserver's public key; a different key is refused before any login |
 | `BIND`            | `HOST`, else `0.0.0.0`         | listen address, e.g. `127.0.0.1` behind a reverse proxy |
 | `PORT`            | `3000`                         | listen port |
 | `RUST_LOG`        | `haus=debug,tower_http=info`   | log filter ([`EnvFilter`](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html) syntax) |
@@ -56,6 +62,40 @@ The last 2000 readings are kept in memory; requests that need the full history
 (data range, analytics) read the JSONL file on a blocking thread, so they
 never stall the server.
 
+### The Loxone source
+
+With `LOXONE_URL` set, haus connects to the Miniserver's websocket, exchanges
+an AES session key, and authenticates with its stored token. It uses the
+password only to acquire a token, and token commands are always sent
+encrypted. It then loads the structure file and listens for value events. It
+sends only an allow-listed set of read commands; nothing that switches or
+sets anything in the home.
+
+Over plain `ws://` the session is only as trustworthy as the Miniserver's
+public key, so haus pins it. Either set `LOXONE_KEY_SHA256` or, without it,
+haus trusts the first key it sees and remembers it in the token file. A
+different key later is refused before anything derived from the credentials
+is sent. Prefer `wss://` where the Miniserver supports TLS. A Miniserver user
+without control rights limits what a stolen token could do.
+
+Events are stored for the Loxone series the store already has, normally the
+ones a Stats4Lox import created, keyed by control UUID and field. A field
+`Default` maps to the control's `value` state. Other fields, such as a room
+controller's outputs, need a `LOXONE_MAP` entry naming the state. At startup
+haus logs `Loxone: N of M series mapped to states` and every series it
+could not map.
+
+### Importing history
+
+```sh
+haus import loriot sensor_history.jsonl [--names devices.json]
+haus import stats4lox <export dir>      # manifest.json + <measurement>/<YYYY-MM>.jsonl.gz
+```
+
+Each import reads every point back from the store, and a Stats4Lox import
+also compares its counts with InfluxDB's own count in the manifest. Any
+difference makes it exit 1. Re-running an import stores nothing twice.
+
 ### Health check
 
 `GET /health` answers `200` whenever the process and its runtime are alive,
@@ -63,9 +103,14 @@ even while LORIOT is unreachable, so a watchdog does not restart the service
 in a loop. The upstream state is part of the body:
 
 ```json
-{"status":"ok","version":"0.3.0",
+{"status":"ok","version":"0.4.0",
+ "sources":{"loriot":{"connected":true,"last_message_at":"2026-11-06T21:00:00+00:00","last_message_age_secs":42},
+            "loxone":{"connected":true,"last_message_at":"2026-11-06T21:00:30+00:00","last_message_age_secs":12}},
  "upstream":{"connected":true,"last_message_at":"2026-11-06T21:00:00+00:00","last_message_age_secs":42}}
 ```
+
+`sources` has one entry per configured source. `upstream` repeats
+`sources.loriot` for watchdogs written against 0.3.0.
 
 The websocket client detects a dead or silent connection (no frame for 75 s,
 pinging every 30 s), bounds the handshake and every write with a timeout, and
