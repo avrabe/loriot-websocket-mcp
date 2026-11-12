@@ -562,6 +562,7 @@ mod tests {
     }
 
     // rivet: verifies REQ-UI-001
+    // rivet: verifies DD-002
     #[test]
     fn overview_groups_rooms_shows_ages_and_marks_stale_values() {
         let live = Live {
@@ -676,6 +677,7 @@ mod tests {
     }
 
     // rivet: verifies REQ-UI-004
+    // rivet: verifies DD-008
     #[test]
     fn the_only_script_is_the_vendored_htmx() {
         let page = page("t", "b").0;

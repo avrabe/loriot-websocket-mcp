@@ -2,7 +2,7 @@ artifacts:
   - id: DD-001
     type: design-decision
     title: Pin the toolchain to varve's covalent realm
-    status: approved
+    status: verified
     description: >
       Toolchain from the varve covalent layer; rivet comes from it locally and in CI.
     release: v0.4.0
@@ -26,7 +26,7 @@ artifacts:
   - id: DD-002
     type: design-decision
     title: Server-rendered htmx dashboard, as warte does it
-    status: implemented
+    status: verified
     description: >
       Pages rendered on the server with htmx and SSE; trends as server-drawn SVG; no wasm or npm.
     release: v0.4.0
@@ -64,7 +64,7 @@ artifacts:
   - id: DD-003
     type: design-decision
     title: redb as the time-series store
-    status: implemented
+    status: verified
     description: >
       One embedded redb file holds every series, keyed by series id and timestamp.
     release: v0.4.0
@@ -95,7 +95,7 @@ artifacts:
   - id: DD-004
     type: design-decision
     title: Live Loxone data straight from the Miniserver websocket
-    status: implemented
+    status: verified
     description: >
       Live Loxone values come from the Miniserver websocket directly, not from a logger in between.
     release: v0.4.0
@@ -133,7 +133,7 @@ artifacts:
   - id: DD-005
     type: design-decision
     title: Loxone series are identified by UUID
-    status: implemented
+    status: verified
     description: >
       Loxone series are keyed by the control UUID carried in every exported point and live event.
     release: v0.4.0
@@ -158,7 +158,7 @@ artifacts:
   - id: DD-006
     type: design-decision
     title: Count checks in the import, as the export did
-    status: implemented
+    status: verified
     description: >
       Every import ends with a per-series count comparison against its source and fails on a difference.
     release: v0.4.0
@@ -182,6 +182,7 @@ artifacts:
     type: design-decision
     title: Stay separate from wohl, feed it later
     status: draft
+    release: backlog
     fields:
       decision: >
         haus remains its own collector and dashboard; integration with
@@ -198,7 +199,7 @@ artifacts:
   - id: DD-008
     type: design-decision
     title: v0.4.0 scope is the core, under the name haus
-    status: implemented
+    status: verified
     description: >
       v0.4.0 ships the core pages only under the new name; MCP is removed; other pages return later.
     release: v0.4.0
@@ -223,7 +224,7 @@ artifacts:
   - id: DD-009
     type: design-decision
     title: Keep the 0.3.0 release pipeline
-    status: approved
+    status: implemented
     description: >
       The 0.3.0 release pipeline (static binaries, SBOM, cosign-signed sums) carries over.
     release: v0.4.0
@@ -244,6 +245,7 @@ artifacts:
     type: design-decision
     title: wmbusmeters decodes the radio, haus consumes its JSON
     status: draft
+    release: backlog
     fields:
       decision: >
         A wM-Bus USB receiver (an IMST iU891A/iU893A-class stick, C1+T1)
@@ -265,7 +267,7 @@ artifacts:
   - id: DD-011
     type: design-decision
     title: Keep the 0.3.0 LORIOT client and generalise its health state
-    status: implemented
+    status: verified
     release: v0.4.0
     description: >
       The LORIOT websocket client stays as it is; its connection state becomes
@@ -289,7 +291,7 @@ artifacts:
   - id: DD-012
     type: design-decision
     title: The Miniserver client sends only an allow-listed set of commands
-    status: implemented
+    status: verified
     release: v0.4.0
     description: >
       Every command the Loxone client can send is a constant in one list

@@ -676,6 +676,7 @@ mod tests {
     }
 
     // rivet: verifies REQ-IMPORT-002
+    // rivet: verifies DD-006
     #[test]
     fn stats4lox_import_matches_influx_counts_and_takes_a_delta() {
         let d = tmpdir("s4l-ok");

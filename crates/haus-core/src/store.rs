@@ -366,6 +366,7 @@ mod tests {
     }
 
     // rivet: verifies REQ-MODEL-001
+    // rivet: verifies DD-005
     #[test]
     fn series_identity_is_the_key_not_the_name() {
         let path = tmp("identity");
@@ -436,6 +437,7 @@ mod tests {
     }
 
     // rivet: partially-verifies REQ-STORE-001
+    // rivet: verifies DD-003
     #[test]
     fn range_reads_one_series_inclusive_and_ordered() {
         let path = tmp("range");

@@ -413,6 +413,7 @@ mod tests {
     }
 
     // rivet: verifies REQ-HEALTH-001
+    // rivet: verifies DD-011
     #[tokio::test]
     async fn health_is_ok_and_reports_every_source() {
         let state = crate::state::tests::test_state("health", AppConfig::default());

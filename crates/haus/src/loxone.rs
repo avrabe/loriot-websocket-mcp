@@ -882,6 +882,7 @@ mod tests {
 
     // rivet: verifies REQ-LOX-001
     // rivet: verifies REQ-LOX-002
+    // rivet: verifies DD-004
     #[tokio::test(flavor = "current_thread")]
     async fn a_session_stores_events_of_known_series_only() {
         let logs = global_logs();
