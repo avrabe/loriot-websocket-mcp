@@ -81,7 +81,10 @@ ones a Stats4Lox import created, keyed by control UUID and field. A field
 `Default` maps to the control's `value` state. Other fields, such as a room
 controller's outputs, need a `LOXONE_MAP` entry naming the state. At startup
 haus logs `Loxone: N of M series mapped to states` and every series it
-could not map.
+could not map. When the structure file lists far fewer controls than haus has
+Loxone sensors, the Miniserver user lacks rights: it shows a user only the
+controls that user may see. Give the user visualisation rights on the
+controls in Loxone Config, or use another user.
 
 ### The dashboard
 
