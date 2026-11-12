@@ -562,10 +562,16 @@ async fn session(state: &AppState, cfg: &LoxoneConfig) -> Result<(), BoxError> {
         match describe_control(&structure, uuid) {
             Some(info) if info.value_state.is_some() => {
                 let (quantity, unit) = loxone_quantity(&info.category, &info.name);
+                // The quantity's unit, else what the Miniserver displays (lx).
+                let unit = if unit.is_empty() {
+                    info.unit.clone().unwrap_or_default()
+                } else {
+                    unit.to_string()
+                };
                 tracked.push(SeriesMeta {
                     key: SeriesKey::new(Source::Loxone, uuid.to_lowercase(), "Default"),
                     quantity,
-                    unit: unit.to_string(),
+                    unit,
                     name: info.name,
                     room: info.room,
                 });
@@ -697,6 +703,8 @@ mod tests {
     /// A sensor with no imported history, followed through LOXONE_TRACK.
     const TRACKED: &str = "1e000000-0000-0002-ffff000000000001";
     const TRACKED_STATE: &str = "1e000000-0000-0002-ffff000000000002";
+    /// A brightness sensor: no climate category, unit only in its format.
+    const LUX: &str = "1e000000-0000-0003-ffff000000000001";
 
     #[derive(Clone, Copy, PartialEq)]
     enum After {
@@ -757,10 +765,13 @@ mod tests {
     fn structure() -> serde_json::Value {
         json!({"lastModified": "2026-11-12 10:00:00",
             "rooms": {"r1": {"name": "Room A"}},
-            "cats": {"c1": {"name": "Luftfeuchte"}},
+            "cats": {"c1": {"name": "Luftfeuchte"}, "c2": {"name": "Einstellungen"}},
             "controls": {
             TRACKED: {"type": "InfoOnlyAnalog", "uuidAction": TRACKED, "name": "Air sensor",
                       "room": "r1", "cat": "c1", "states": {"value": TRACKED_STATE}},
+            LUX: {"type": "InfoOnlyAnalog", "uuidAction": LUX, "name": "Brightness",
+                  "room": "r1", "cat": "c2", "details": {"format": "%.0fLx"},
+                  "states": {"value": LUX}},
             CTRL: {"type": "InfoOnlyAnalog", "uuidAction": CTRL, "states": {"value": CTRL_STATE}},
             ROOM: {"type": "IRoomControllerV2", "uuidAction": ROOM,
                    "states": {"tempActual": "1d000000-0000-0001-ffff000000000002",
@@ -1358,7 +1369,7 @@ mod tests {
         let token_file = tmp_file("track");
         let mut cfg = config(url, PASSWORD, token_file.clone());
         cfg.overrides = HashMap::from([(format!("{ROOM}/HCm"), "-".to_string())]);
-        cfg.track = vec![TRACKED.to_uppercase()];
+        cfg.track = vec![TRACKED.to_uppercase(), LUX.to_string()];
         let task = tokio::spawn(run_loxone_connection(st.clone(), cfg));
         wait_for("the tracked sensor's value", || {
             st.ingest
@@ -1377,12 +1388,19 @@ mod tests {
         assert_eq!(t.1.name, "Air sensor");
         assert_eq!(t.1.room.as_deref(), Some("Room A"));
         assert_eq!(t.1.quantity, haus_core::store::Quantity::Humidity);
+        assert_eq!(t.1.unit, "%");
+        // No climate category: the unit comes from the display format.
+        let l = metas.iter().find(|(_, m)| m.key.source_id == LUX).unwrap();
+        assert_eq!(
+            (l.1.quantity, l.1.unit.as_str()),
+            (haus_core::store::Quantity::Other, "lx")
+        );
         // The retired field got nothing, the plain one did.
         assert!(points(&st, ROOM, "HCm").is_empty());
         assert_eq!(points(&st, CTRL, "Default"), vec![21.5]);
         let log = String::from_utf8(logs.0.lock().unwrap().clone()).unwrap();
         assert!(
-            log.contains("2 of 3 series mapped to states, 1 retired"),
+            log.contains("3 of 4 series mapped to states, 1 retired"),
             "{log}"
         );
         let _ = std::fs::remove_file(&token_file);

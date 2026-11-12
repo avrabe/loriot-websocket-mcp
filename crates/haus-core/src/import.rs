@@ -274,7 +274,7 @@ pub fn loxone_quantity(category: &str, measurement: &str) -> (Quantity, &'static
     let m = measurement.to_lowercase();
     if c.starts_with("temperatur") || m.starts_with("temperatur") || c.starts_with("temperature") {
         (Quantity::Temperature, "°C")
-    } else if c.starts_with("luftfeucht") || m.starts_with("luftfeucht") || c.contains("humidity") {
+    } else if c.contains("luftfeucht") || m.contains("luftfeucht") || c.contains("humidity") {
         (Quantity::Humidity, "%")
     } else if m.starts_with("stellantrieb") || c.contains("valve") {
         (Quantity::ValvePosition, "%")
@@ -935,6 +935,11 @@ mod tests {
     fn loxone_quantities_from_category_and_name() {
         assert_eq!(loxone_quantity("Temperatur", "x").0, Quantity::Temperature);
         assert_eq!(loxone_quantity("", "Luftfeuchte Bad").0, Quantity::Humidity);
+        // An outdoor weather value named "Rel.Luftfeuchte".
+        assert_eq!(
+            loxone_quantity("Wetter", "Rel.Luftfeuchte").0,
+            Quantity::Humidity
+        );
         assert_eq!(
             loxone_quantity("Heizung", "Stellantrieb Air").0,
             Quantity::ValvePosition

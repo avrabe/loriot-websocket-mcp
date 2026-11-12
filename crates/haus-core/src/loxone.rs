@@ -482,6 +482,23 @@ pub struct ControlInfo {
     pub room: Option<String>,
     pub category: String,
     pub value_state: Option<LoxUuid>,
+    /// The unit from the control's display format (`%.0fLx` → `lx`).
+    pub unit: Option<String>,
+}
+
+/// The unit a Loxone display format puts after the number: `%.0fLx` → `lx`,
+/// `%.0f%%` → `%`, `%.1f°` → `°C`. `None` when there is none.
+pub fn format_unit(format: &str) -> Option<String> {
+    let start = format.find('%')?;
+    let rest = &format[start + 1..];
+    let conv = rest.find(|c: char| c.is_ascii_alphabetic())?;
+    let unit = rest[conv + 1..].replace("%%", "%").trim().to_string();
+    match unit.as_str() {
+        "" => None,
+        "°" => Some("°C".into()),
+        u if u.eq_ignore_ascii_case("lx") => Some("lx".into()),
+        _ => Some(unit),
+    }
 }
 
 pub fn describe_control(structure: &Value, uuid: &str) -> Option<ControlInfo> {
@@ -518,6 +535,7 @@ pub fn describe_control(structure: &Value, uuid: &str) -> Option<ControlInfo> {
         room: lookup("rooms", "room"),
         category: lookup("cats", "cat").unwrap_or_default(),
         value_state,
+        unit: c["details"]["format"].as_str().and_then(format_unit),
     })
 }
 
@@ -830,6 +848,16 @@ mod tests {
         // Default and AQ both follow the value state, neither is lost.
         let both = &r.states[&LoxUuid::parse("13f00a65-01a9-8a08-ffff196db5c1dff4").unwrap()];
         assert_eq!(both.len(), 2, "{both:?}");
+    }
+
+    #[test]
+    fn units_come_from_the_display_format() {
+        assert_eq!(format_unit("%.0fLx").as_deref(), Some("lx"));
+        assert_eq!(format_unit("%.0f%%").as_deref(), Some("%"));
+        assert_eq!(format_unit("%.1f°").as_deref(), Some("°C"));
+        assert_eq!(format_unit("%.2f kWh").as_deref(), Some("kWh"));
+        assert_eq!(format_unit("%.1f"), None);
+        assert_eq!(format_unit("no number"), None);
     }
 
     #[test]
