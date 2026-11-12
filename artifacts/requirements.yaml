@@ -35,7 +35,7 @@ artifacts:
   - id: REQ-MODEL-001
     type: requirement
     title: One data model for every source
-    status: approved
+    status: verified
     release: v0.4.0
     description: >
       Readings are stored as source → sensor → series. A sensor has a source
@@ -106,7 +106,10 @@ artifacts:
     description: >
       `haus import stats4lox <dir>` reads a Stats4Lox InfluxDB export
       (manifest.json plus <measurement>/<YYYY-MM>.jsonl.gz), keys each series by
-      the point's `uuid`, skips telegraf `internal_*` measurements, and fails if
+      the point's `uuid` and field, skips telegraf `internal_*` measurements
+      and measurements whose points carry no `uuid` (Miniserver diagnostics
+      such as `stats_miniserver`), naming every skipped measurement in its
+      report, and fails if
       the stored count per measurement and field differs from the manifest's
       `influx_counts`. Points already stored (same uuid and timestamp) are not
       stored again, so a later delta export can be imported over the full one.
