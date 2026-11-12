@@ -784,32 +784,12 @@ mod tests {
         }
         let app = app(state);
 
-        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let max_gap = std::sync::Arc::new(std::sync::Mutex::new(std::time::Duration::ZERO));
-        let (s, m) = (stop.clone(), max_gap.clone());
-        let ticker = tokio::spawn(async move {
-            let mut last = std::time::Instant::now();
-            while !s.load(std::sync::atomic::Ordering::Relaxed) {
-                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-                let gap = last.elapsed();
-                let mut g = m.lock().unwrap();
-                *g = (*g).max(gap);
-                last = std::time::Instant::now();
-            }
-        });
-        tokio::task::yield_now().await;
-        let t0 = std::time::Instant::now();
-        let (status, body) = get(&app, &format!("/sensor/{id}?range=90d")).await;
-        let took = t0.elapsed();
-        stop.store(true, std::sync::atomic::Ordering::Relaxed);
-        ticker.await.unwrap();
+        let (resp, ticks, took) =
+            crate::api::tests::ticks_during(get(&app, &format!("/sensor/{id}?range=90d"))).await;
+        let (status, body) = resp;
         assert_eq!(status, StatusCode::OK);
         assert!(body.contains(r#"class="line""#));
-        let gap = *max_gap.lock().unwrap();
         // The read must not run on the runtime: the 5 ms ticker keeps ticking.
-        assert!(
-            gap < std::time::Duration::from_millis(50) || gap < took / 4,
-            "runtime stalled {gap:?} during a {took:?} read"
-        );
+        crate::api::tests::assert_runtime_was_free(ticks, took, "/sensor 90d");
     }
 }

@@ -221,5 +221,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          gh release create "$TAG" --verify-tag --title "haus ${TAG#v}" --generate-notes \
+          # A tag with a suffix (v0.4.0-rc.1) is a pre-release: never "latest".
+          pre=()
+          case "$TAG" in *-*) pre=(--prerelease --latest=false) ;; esac
+          gh release create "$TAG" --verify-tag --title "haus ${TAG#v}" --generate-notes "${pre[@]}" \
             haus-* sbom.json SHA256SUMS.txt SHA256SUMS.txt.cosign.bundle
