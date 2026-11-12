@@ -4,6 +4,7 @@
 //! and reports each source's connection state on `/health`.
 
 mod api;
+mod import_cmd;
 mod sse;
 mod state;
 mod websocket;
@@ -21,6 +22,7 @@ pub use state::AppState;
 
 const USAGE: &str = "\
 Usage: haus [--help | --version]
+       haus import loriot|stats4lox <path> [options]   (haus import --help)
 
 Keeps home climate readings (LoRaWAN via LORIOT) and serves them over HTTP.
 
@@ -34,6 +36,7 @@ Environment:
 #[derive(Debug, PartialEq)]
 enum Cli {
     Run,
+    Import(import_cmd::ImportArgs),
     Exit { code: i32, stdout: String },
 }
 
@@ -48,6 +51,19 @@ fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Cli {
         Some("-h" | "--help") if args.len() == 1 => Cli::Exit {
             code: 0,
             stdout: USAGE.to_string(),
+        },
+        Some("import") if matches!(args.get(1).map(String::as_str), Some("-h" | "--help")) => {
+            Cli::Exit {
+                code: 0,
+                stdout: import_cmd::USAGE.to_string(),
+            }
+        }
+        Some("import") => match import_cmd::parse(&args[1..], std::env::var("HAUS_STORE").ok()) {
+            Ok(a) => Cli::Import(a),
+            Err(e) => Cli::Exit {
+                code: 2,
+                stdout: format!("haus import: {e}\n\n{}", import_cmd::USAGE),
+            },
         },
         Some(_) => Cli::Exit {
             code: 2,
@@ -105,11 +121,14 @@ async fn health(State(state): State<AppState>) -> Json<serde_json::Value> {
 fn main() -> anyhow::Result<()> {
     match parse_args(std::env::args().skip(1)) {
         Cli::Run => {}
+        Cli::Import(a) => std::process::exit(import_cmd::run(&a)),
         Cli::Exit { code, stdout } => {
             if code == 0 {
                 println!("{stdout}");
-            } else {
+            } else if stdout.is_empty() {
                 eprintln!("haus: unrecognized arguments\n\n{USAGE}");
+            } else {
+                eprintln!("{stdout}");
             }
             std::process::exit(code);
         }

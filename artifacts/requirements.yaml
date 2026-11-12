@@ -85,7 +85,7 @@ artifacts:
   - id: REQ-IMPORT-001
     type: requirement
     title: Import the LoRaWAN history with a count check
-    status: approved
+    status: verified
     release: v0.4.0
     description: >
       `haus import loriot <sensor_history.jsonl>` stores every reading. It fails
@@ -101,7 +101,7 @@ artifacts:
   - id: REQ-IMPORT-002
     type: requirement
     title: Import the Stats4Lox export with a count check
-    status: approved
+    status: verified
     release: v0.4.0
     description: >
       `haus import stats4lox <dir>` reads a Stats4Lox InfluxDB export
