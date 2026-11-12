@@ -325,6 +325,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn data_range_does_not_block_the_runtime() {
+        let _serial = crate::state::tests::serial().await;
         let state = state_with_history("range", 300_000);
         let start = Instant::now();
         let (Json(range), gap) = max_tick_gap(get_data_range(State(state))).await;
@@ -344,6 +345,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn analytics_does_not_block_the_runtime() {
+        let _serial = crate::state::tests::serial().await;
         let state = state_with_history("analytics", 300_000);
         let query = ReadingsQuery {
             time_window: Some("all".into()),

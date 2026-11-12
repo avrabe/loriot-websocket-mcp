@@ -416,18 +416,21 @@ mod tests {
     // rivet: verifies REQ-LORIOT-001
     #[tokio::test(flavor = "current_thread")]
     async fn reconnects_when_upstream_goes_silent() {
+        let _serial = crate::state::tests::serial().await;
         assert_reconnects(Upstream::GoSilent, fast(), Duration::from_secs(5)).await;
     }
 
     // rivet: verifies REQ-LORIOT-001
     #[tokio::test(flavor = "current_thread")]
     async fn reconnects_when_upstream_drops_tcp() {
+        let _serial = crate::state::tests::serial().await;
         assert_reconnects(Upstream::DropTcp, fast(), Duration::from_secs(6)).await;
     }
 
     // rivet: verifies REQ-LORIOT-001
     #[tokio::test(flavor = "current_thread")]
     async fn reconnects_when_handshake_never_completes() {
+        let _serial = crate::state::tests::serial().await;
         // Uses the production connect timeout on purpose.
         assert_reconnects(Upstream::NoHandshake, fast(), Duration::from_secs(20)).await;
     }
@@ -435,6 +438,7 @@ mod tests {
     // rivet: verifies REQ-LORIOT-001
     #[tokio::test(flavor = "current_thread")]
     async fn keeps_a_quiet_upstream_that_answers_pings() {
+        let _serial = crate::state::tests::serial().await;
         let (url, accepts) = spawn_upstream(Upstream::QuietButAlive).await;
         let cfg = LoriotClientConfig { url, ..fast() };
         let client = tokio::spawn(run_loriot_connection_with(test_state("quiet"), cfg));
