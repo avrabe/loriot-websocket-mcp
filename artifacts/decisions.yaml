@@ -178,7 +178,7 @@ artifacts:
   - id: DD-008
     type: design-decision
     title: v0.4.0 scope is the core, under the name haus
-    status: approved
+    status: implemented
     description: >
       v0.4.0 ships the core pages only under the new name; MCP is removed; other pages return later.
     release: v0.4.0

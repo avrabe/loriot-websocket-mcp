@@ -1,21 +1,21 @@
 [package]
-name = "loriot-server"
+name = "haus"
 version.workspace = true
 edition.workspace = true
-description = "Web server for LoRaWAN sensor monitoring dashboard"
+description = "haus: home climate history from LoRaWAN and Loxone, with a web dashboard"
 license.workspace = true
 
 [[bin]]
-name = "loriot-server"
+name = "haus"
 path = "src/main.rs"
 
 [dependencies]
-loriot-core = { path = "../loriot-core", features = ["async"] }
+haus-core = { path = "../haus-core" }
 
 # Web framework
 axum = { version = "0.8", features = ["ws"] }
 tower = "0.5"
-tower-http = { version = "0.6", features = ["fs", "cors", "trace"] }
+tower-http = { version = "0.6", features = ["cors", "trace"] }
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }

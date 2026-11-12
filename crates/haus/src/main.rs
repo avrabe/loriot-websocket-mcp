@@ -1,34 +1,17 @@
-//! LoRaWAN Sensor Monitoring Web Server
+//! haus: home climate history from LoRaWAN (LORIOT) and Loxone.
 //!
-//! This server provides:
-//! - WebSocket connection to Loriot for sensor data ingestion
-//! - SSE endpoints for real-time updates to browser clients
-//! - REST API for historical data and analytics
-//! - Static file serving for the Leptos frontend
+//! The server keeps every reading, serves a REST/SSE API and a dashboard,
+//! and reports each source's connection state on `/health`.
 
 mod api;
-mod energy;
-mod forecast;
-mod heatpump;
 mod sse;
 mod state;
-mod thermal;
-mod weather;
 mod websocket;
 
-use axum::{
-    extract::State,
-    http::StatusCode,
-    response::{Html, IntoResponse},
-    routing::{get, post},
-    Json, Router,
-};
-use loriot_core::{load_device_names, AppConfig, StorageConfig, StorageManager};
-use std::sync::Arc;
-use tokio::sync::RwLock;
+use axum::{extract::State, routing::get, Json, Router};
+use haus_core::{load_device_names, AppConfig, StorageConfig, StorageManager};
 use tower_http::{
     cors::{Any, CorsLayer},
-    services::ServeDir,
     trace::{DefaultMakeSpan, DefaultOnRequest, DefaultOnResponse, TraceLayer},
 };
 use tracing::Level;
@@ -37,15 +20,15 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 pub use state::AppState;
 
 const USAGE: &str = "\
-Usage: loriot-server [--help | --version]
+Usage: haus [--help | --version]
 
-Reads LoRaWAN sensor data from the LORIOT websocket and serves the dashboard.
+Keeps home climate readings (LoRaWAN via LORIOT) and serves them over HTTP.
 
 Environment:
   LORIOT_WS_TOKEN  LORIOT application token (required to run)
   BIND             listen address (falls back to HOST, default 0.0.0.0)
   PORT             listen port (default 3000)
-  RUST_LOG         log filter (default loriot_server=debug,tower_http=info)";
+  RUST_LOG         log filter (default haus=debug,tower_http=info)";
 
 /// What the command line asks for.
 #[derive(Debug, PartialEq)]
@@ -60,7 +43,7 @@ fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Cli {
         None => Cli::Run,
         Some("-V" | "--version") if args.len() == 1 => Cli::Exit {
             code: 0,
-            stdout: format!("loriot-server {}", env!("CARGO_PKG_VERSION")),
+            stdout: format!("haus {}", env!("CARGO_PKG_VERSION")),
         },
         Some("-h" | "--help") if args.len() == 1 => Cli::Exit {
             code: 0,
@@ -82,7 +65,7 @@ fn bind_host(bind: Option<String>, host: Option<String>) -> String {
 }
 
 /// Default log filter when RUST_LOG is unset.
-const DEFAULT_LOG_FILTER: &str = "loriot_server=debug,tower_http=info";
+const DEFAULT_LOG_FILTER: &str = "haus=debug,tower_http=info";
 
 /// Add request logging and CORS. Every request to `app` gets one INFO line
 /// when its response is sent (request start is DEBUG). `health` is merged in
@@ -126,7 +109,7 @@ fn main() -> anyhow::Result<()> {
             if code == 0 {
                 println!("{stdout}");
             } else {
-                eprintln!("loriot-server: unrecognized arguments\n\n{USAGE}");
+                eprintln!("haus: unrecognized arguments\n\n{USAGE}");
             }
             std::process::exit(code);
         }
@@ -194,72 +177,6 @@ async fn run() -> anyhow::Result<()> {
     // Create shared application state
     let state = AppState::new(storage, device_names, config.clone());
 
-    // Create weather state
-    let weather_state: weather::SharedWeatherState =
-        Arc::new(RwLock::new(weather::WeatherState::new()));
-
-    // Set default location (Bochum area) if not configured
-    {
-        let mut ws = weather_state.write().await;
-        ws.set_location(loriot_core::weather::Coordinates::new(51.4818, 7.2162));
-    }
-
-    // Create heat pump state
-    let heatpump_state: heatpump::SharedHeatPumpState =
-        Arc::new(RwLock::new(heatpump::HeatPumpState::new()));
-
-    // Create energy state
-    let energy_state: energy::SharedEnergyState = Arc::new(RwLock::new(energy::EnergyState::new()));
-
-    // Build weather API router (separate state)
-    let weather_router = Router::new()
-        .route("/info", get(weather::get_weather_info))
-        .route("/current", get(weather::get_current_weather))
-        .route("/history", get(weather::get_weather_history))
-        .route("/statistics", get(weather::get_weather_statistics))
-        .route("/geocode", get(weather::geocode_address))
-        .route("/stations", get(weather::get_stations))
-        .route("/location", post(weather::set_location))
-        .route("/fetch", post(weather::fetch_weather_data))
-        .with_state(weather_state.clone());
-
-    // Build heat pump API router (needs app + weather state)
-    let heatpump_combined_state = heatpump::CombinedHeatPumpState {
-        app: state.clone(),
-        weather: weather_state.clone(),
-        heatpump: heatpump_state,
-    };
-    let heatpump_router = Router::new()
-        .route("/info", get(heatpump::get_heatpump_info))
-        .route("/configure", post(heatpump::configure_heatpump))
-        .route("/analyze", get(heatpump::analyze_heatpump))
-        .route("/devices", get(heatpump::get_available_devices))
-        .with_state(heatpump_combined_state);
-
-    // Build thermal analysis API router (needs app + weather state)
-    let thermal_state = thermal::ThermalState {
-        app: state.clone(),
-        weather: weather_state.clone(),
-    };
-    let thermal_router = Router::new()
-        .route("/analyze", get(thermal::analyze_thermal))
-        .route("/summary", get(thermal::get_thermal_summary))
-        .with_state(thermal_state);
-
-    // Build forecast API router (needs app + weather state)
-    let forecast_state = forecast::ForecastState {
-        app: state.clone(),
-        weather: weather_state,
-    };
-    let forecast_router = Router::new()
-        .route("/", get(forecast::get_weather_forecast))
-        .route("/rooms", get(forecast::get_room_predictions))
-        .route("/models", get(forecast::get_thermal_models))
-        .with_state(forecast_state);
-
-    // Build energy API router
-    let energy_router = energy::energy_router().with_state(energy_state);
-
     // Build main API router
     let app = Router::new()
         // API routes
@@ -274,29 +191,7 @@ async fn run() -> anyhow::Result<()> {
         // SSE routes
         .route("/sse/readings", get(sse::readings_stream))
         .route("/sse/status", get(sse::status_stream))
-        .with_state(state.clone())
-        // Nest weather routes
-        .nest("/api/weather", weather_router)
-        // Nest heat pump routes
-        .nest("/api/heatpump", heatpump_router)
-        // Nest thermal analysis routes
-        .nest("/api/thermal", thermal_router)
-        // Nest forecast routes
-        .nest("/api/forecast", forecast_router)
-        // Nest energy routes
-        .nest("/api/energy", energy_router)
-        // Static files with SPA fallback
-        .fallback_service(
-            ServeDir::new("assets")
-                .append_index_html_on_directories(true)
-                .fallback(tower::service_fn(|_| async {
-                    // Serve index.html for SPA routes
-                    match tokio::fs::read_to_string("assets/index.html").await {
-                        Ok(html) => Ok((StatusCode::OK, Html(html)).into_response()),
-                        Err(_) => Ok((StatusCode::NOT_FOUND, "Not found").into_response()),
-                    }
-                })),
-        );
+        .with_state(state.clone());
     // Health check (liveness; see `health`), outside the request log.
     let health_router = Router::new()
         .route("/health", get(health))
@@ -324,18 +219,20 @@ async fn run() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use loriot_core::{StorageConfig, StorageManager};
+    use axum::http::StatusCode;
+    use haus_core::{StorageConfig, StorageManager};
     use std::collections::HashMap;
 
     fn args(a: &[&str]) -> Vec<String> {
         a.iter().map(|s| s.to_string()).collect()
     }
 
+    // rivet: verifies REQ-NAME-001
     #[test]
     fn version_flag_prints_name_and_semver() {
         let want = Cli::Exit {
             code: 0,
-            stdout: format!("loriot-server {}", env!("CARGO_PKG_VERSION")),
+            stdout: format!("haus {}", env!("CARGO_PKG_VERSION")),
         };
         assert_eq!(parse_args(args(&["--version"])), want);
         assert_eq!(parse_args(args(&["-V"])), want);

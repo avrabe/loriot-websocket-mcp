@@ -22,9 +22,6 @@ devices.json
 *.jsonl.*
 *.json.md
 
-# Node
-node_modules/
-
 # Data / non-source files
 climate_data_*.json
 daily_calculations.json
@@ -35,10 +32,6 @@ stations.txt
 description.txt
 produktflyer_s735.*
 tageswerte_KL_*/
-
-# Generated WASM / JS assets
-assets/
-crates/loriot-server/assets/
 
 # Logs
 *.log
