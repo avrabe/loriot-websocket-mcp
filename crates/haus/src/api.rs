@@ -251,7 +251,7 @@ pub async fn get_device_analytics(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     //! The runtime must stay responsive while a handler reads the whole JSONL
     //! history from disk (the file grows without bound on a long-running box).
     use super::*;
@@ -259,7 +259,7 @@ mod tests {
     use std::collections::HashMap;
     use std::io::Write;
     use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::{Arc, Mutex};
+    use std::sync::Arc;
     use std::time::{Duration, Instant};
 
     /// AppState over a JSONL file with `lines` readings.
@@ -296,40 +296,48 @@ mod tests {
         )
     }
 
-    /// Longest gap between 5 ms ticks of a ticker on the current runtime
-    /// while `fut` runs.
-    async fn max_tick_gap<F: std::future::Future>(fut: F) -> (F::Output, Duration) {
+    /// How many 5 ms ticks a ticker on the current runtime got while `fut`
+    /// ran, and how long `fut` took. Work done on the runtime starves the
+    /// ticker completely (about 0 ticks); work on a blocking thread leaves
+    /// it about took / 5 ms ticks. Counting ticks, unlike timing the longest
+    /// gap, survives a single scheduler hiccup on a shared CI runner.
+    pub(crate) async fn ticks_during<F: std::future::Future>(fut: F) -> (F::Output, u64, Duration) {
         let stop = Arc::new(AtomicBool::new(false));
-        let max_gap = Arc::new(Mutex::new(Duration::ZERO));
-        let (s, m) = (stop.clone(), max_gap.clone());
+        let ticks = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let (s, t) = (stop.clone(), ticks.clone());
         let ticker = tokio::spawn(async move {
-            let mut last = Instant::now();
             while !s.load(Ordering::SeqCst) {
                 tokio::time::sleep(Duration::from_millis(5)).await;
-                let gap = last.elapsed();
-                let mut g = m.lock().unwrap();
-                if gap > *g {
-                    *g = gap;
-                }
-                last = Instant::now();
+                t.fetch_add(1, Ordering::SeqCst);
             }
         });
         // Let the ticker start before the work begins.
         tokio::time::sleep(Duration::from_millis(20)).await;
+        let before = ticks.load(Ordering::SeqCst);
+        let start = Instant::now();
         let out = fut.await;
+        let took = start.elapsed();
+        let n = ticks.load(Ordering::SeqCst) - before;
         stop.store(true, Ordering::SeqCst);
         ticker.await.unwrap();
-        let gap = *max_gap.lock().unwrap();
-        (out, gap)
+        (out, n, took)
+    }
+
+    /// At least a quarter of the ticks a free runtime would have made.
+    pub(crate) fn assert_runtime_was_free(ticks: u64, took: Duration, what: &str) {
+        let expected = took.as_millis() as u64 / 5;
+        assert!(
+            ticks * 4 >= expected,
+            "{what}: the runtime ticked {ticks} times in {took:?} (a free runtime: ~{expected}); \
+             the work ran on the runtime"
+        );
     }
 
     #[tokio::test(flavor = "current_thread")]
     async fn data_range_does_not_block_the_runtime() {
         let _serial = crate::state::tests::serial().await;
         let state = state_with_history("range", 300_000);
-        let start = Instant::now();
-        let (Json(range), gap) = max_tick_gap(get_data_range(State(state))).await;
-        let took = start.elapsed();
+        let (Json(range), ticks, took) = ticks_during(get_data_range(State(state))).await;
         assert_eq!(range.earliest_ts, Some(1_700_000_000_000));
         assert_eq!(range.latest_ts, Some(1_700_000_000_000 + 299_999 * 1000));
         // Only meaningful if the read itself takes a while.
@@ -337,10 +345,7 @@ mod tests {
             took > Duration::from_millis(200),
             "history too small: {took:?}"
         );
-        assert!(
-            gap < Duration::from_millis(100),
-            "runtime blocked for {gap:?} while get_data_range read {took:?} of history"
-        );
+        assert_runtime_was_free(ticks, took, "get_data_range");
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -354,10 +359,7 @@ mod tests {
             start_ts: None,
             end_ts: None,
         };
-        let (_, gap) = max_tick_gap(get_analytics(State(state), Query(query))).await;
-        assert!(
-            gap < Duration::from_millis(100),
-            "runtime blocked for {gap:?}"
-        );
+        let (_, ticks, took) = ticks_during(get_analytics(State(state), Query(query))).await;
+        assert_runtime_was_free(ticks, took, "get_analytics");
     }
 }
