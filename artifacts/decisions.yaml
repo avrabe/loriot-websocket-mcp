@@ -317,3 +317,35 @@ artifacts:
     links:
       - type: satisfies
         target: REQ-LOX-002
+
+  - id: DD-013
+    type: design-decision
+    title: Retire and track Loxone series through configuration
+    status: verified
+    release: v0.4.0
+    description: >
+      LOXONE_MAP marks a series retired with "-"; LOXONE_TRACK lists
+      controls to follow without history. One state may feed several series.
+    fields:
+      decision: >
+        A retired series keeps its history, is not followed live and is
+        reported as retired rather than unmapped. A tracked control gets a
+        series (field Default, its value state) with name, room and category
+        from the structure file. A state that several series map to feeds
+        all of them, instead of the last mapping silently winning.
+      rationale: >
+        On the deployment 10 of 38 series did not map: some were recorded by
+        the logger only until early 2025, some are not room measurements, one
+        logger field moved (Default to AQ) after one evening. The owner
+        decided per series (2026-11-12); configuration states those decisions
+        and the startup line makes them visible. New sensors added after the
+        logger stopped would otherwise never be followed.
+      alternatives: >
+        Ignore unmapped series (silent); discover every climate control
+        automatically (would also pick up displays and actuators that show
+        temperatures, as the deployment's structure file has).
+    links:
+      - type: satisfies
+        target: REQ-LOX-001
+      - type: satisfies
+        target: REQ-LOX-005

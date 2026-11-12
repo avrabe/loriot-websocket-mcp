@@ -464,11 +464,65 @@ pub const LOXONE_EPOCH_UNIX_S: i64 = 1_230_768_000;
 /// How a series key of the store maps to a state UUID of the Miniserver.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Resolution {
-    /// State UUID → (control uuid, field) of the series it feeds.
-    pub states: HashMap<LoxUuid, (String, String)>,
+    /// State UUID → every (control uuid, field) series it feeds.
+    pub states: HashMap<LoxUuid, Vec<(String, String)>>,
     /// `control uuid/field` that could not be mapped, with the reason.
     pub unresolved: Vec<String>,
+    /// `control uuid/field` retired in the override file (`"-"`): kept as
+    /// history, deliberately not followed live.
+    pub retired: Vec<String>,
 }
+
+/// What the structure file says about a control: name, room and category
+/// names (rooms and categories are looked up by their uuid), and the state
+/// that carries its value. Searches sub-controls too.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ControlInfo {
+    pub name: String,
+    pub room: Option<String>,
+    pub category: String,
+    pub value_state: Option<LoxUuid>,
+}
+
+pub fn describe_control(structure: &Value, uuid: &str) -> Option<ControlInfo> {
+    let want = uuid.to_lowercase();
+    fn find<'a>(controls: &'a serde_json::Map<String, Value>, want: &str) -> Option<&'a Value> {
+        for c in controls.values() {
+            if c["uuidAction"].as_str().map(str::to_lowercase).as_deref() == Some(want) {
+                return Some(c);
+            }
+            if let Some(found) = c["subControls"].as_object().and_then(|s| find(s, want)) {
+                return Some(found);
+            }
+        }
+        None
+    }
+    let c = find(structure["controls"].as_object()?, &want)?;
+    let lookup = |table: &str, key: &str| {
+        c[key]
+            .as_str()
+            .and_then(|id| structure[table][id]["name"].as_str())
+            .map(str::to_string)
+    };
+    let states = c["states"].as_object();
+    let value_state = states
+        .and_then(|st| {
+            st.get("value").and_then(Value::as_str).or_else(|| {
+                let all: Vec<&str> = st.values().filter_map(Value::as_str).collect();
+                (all.len() == 1).then(|| all[0])
+            })
+        })
+        .and_then(|u| LoxUuid::parse(u).ok());
+    Some(ControlInfo {
+        name: c["name"].as_str().unwrap_or(uuid).to_string(),
+        room: lookup("rooms", "room"),
+        category: lookup("cats", "cat").unwrap_or_default(),
+        value_state,
+    })
+}
+
+/// The override value that retires a series.
+pub const RETIRED: &str = "-";
 
 /// Map wanted series `(control uuid, field)` to state UUIDs using the
 /// structure file (`LoxAPP3.json`).
@@ -512,6 +566,7 @@ pub fn resolve_states(
     let mut res = Resolution {
         states: HashMap::new(),
         unresolved: Vec::new(),
+        retired: Vec::new(),
     };
     for (uuid, field) in wanted {
         let id = format!("{uuid}/{field}");
@@ -523,6 +578,10 @@ pub fn resolve_states(
                 .and_then(Value::as_str)
                 .map(str::to_lowercase)
         };
+        if overrides.get(&id).map(String::as_str) == Some(RETIRED) {
+            res.retired.push(id);
+            continue;
+        }
         let state = if let Some(o) = overrides.get(&id) {
             if LoxUuid::parse(o).is_ok() {
                 Some(o.to_lowercase())
@@ -542,9 +601,11 @@ pub fn resolve_states(
         .or_else(|| (field == "Default" && state_uuids.contains_key(&u)).then(|| u.clone()));
 
         match state.as_deref().map(LoxUuid::parse) {
-            Some(Ok(s)) => {
-                res.states.insert(s, (uuid.clone(), field.clone()));
-            }
+            Some(Ok(s)) => res
+                .states
+                .entry(s)
+                .or_default()
+                .push((uuid.clone(), field.clone())),
             Some(Err(_)) => res
                 .unresolved
                 .push(format!("{id}: state uuid is malformed")),
@@ -738,6 +799,64 @@ mod tests {
     }
 
     #[test]
+    fn retired_series_are_named_and_one_state_can_feed_two_series() {
+        let wanted: Vec<(String, String)> = [
+            ("13f00a65-01a9-8a08-ffff196db5c1dff3", "Default"),
+            ("13f00a65-01a9-8a08-ffff196db5c1dff3", "AQ"),
+            ("1d000000-0000-0001-ffff000000000001", "HCm"),
+            ("ffffffff-0000-0000-0000000000000000", "Default"),
+        ]
+        .iter()
+        .map(|(a, b)| (a.to_string(), b.to_string()))
+        .collect();
+        let overrides = HashMap::from([
+            (
+                "13f00a65-01a9-8a08-ffff196db5c1dff3/AQ".to_string(),
+                "value".to_string(),
+            ),
+            (
+                "1d000000-0000-0001-ffff000000000001/HCm".to_string(),
+                RETIRED.to_string(),
+            ),
+            (
+                "ffffffff-0000-0000-0000000000000000/Default".to_string(),
+                RETIRED.to_string(),
+            ),
+        ]);
+        let r = resolve_states(&structure(), &wanted, &overrides);
+        // Retired, not unresolved; even a control missing from the file.
+        assert_eq!(r.retired.len(), 2, "{:?}", r.retired);
+        assert!(r.unresolved.is_empty(), "{:?}", r.unresolved);
+        // Default and AQ both follow the value state, neither is lost.
+        let both = &r.states[&LoxUuid::parse("13f00a65-01a9-8a08-ffff196db5c1dff4").unwrap()];
+        assert_eq!(both.len(), 2, "{both:?}");
+    }
+
+    #[test]
+    fn a_control_describes_itself_from_the_structure_file() {
+        let s = json!({
+            "rooms": {"r1": {"name": "Room A"}},
+            "cats": {"c1": {"name": "Temperatur"}},
+            "controls": {
+                "p": {"uuidAction": "1e000000-0000-0001-ffff000000000001", "name": "Parent",
+                      "states": {},
+                      "subControls": {"k": {"uuidAction": "1e000000-0000-0002-ffff000000000001",
+                          "name": "Air sensor", "room": "r1", "cat": "c1",
+                          "states": {"value": "1e000000-0000-0002-ffff000000000002"}}}}
+            }
+        });
+        let i = describe_control(&s, "1E000000-0000-0002-ffff000000000001").unwrap();
+        assert_eq!(i.name, "Air sensor");
+        assert_eq!(i.room.as_deref(), Some("Room A"));
+        assert_eq!(i.category, "Temperatur");
+        assert_eq!(
+            i.value_state,
+            Some(LoxUuid::parse("1e000000-0000-0002-ffff000000000002").unwrap())
+        );
+        assert!(describe_control(&s, "1e000000-0000-0003-ffff000000000001").is_none());
+    }
+
+    #[test]
     fn series_resolve_to_state_uuids() {
         let wanted: Vec<(String, String)> = [
             ("13f00a65-01a9-8a08-ffff196db5c1dff3", "Default"), // value state
@@ -754,10 +873,10 @@ mod tests {
         let get = |s: &str| r.states.get(&LoxUuid::parse(s).unwrap()).cloned();
         assert_eq!(
             get("13f00a65-01a9-8a08-ffff196db5c1dff4"),
-            Some((
+            Some(vec![(
                 "13f00a65-01a9-8a08-ffff196db5c1dff3".into(),
                 "Default".into()
-            ))
+            )])
         );
         assert!(get("1d000000-0000-0002-ffff000000000002").is_some());
         assert!(get("1d000000-0000-0001-ffff000000000002").is_some());

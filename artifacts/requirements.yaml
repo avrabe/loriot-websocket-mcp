@@ -147,8 +147,11 @@ artifacts:
     description: >
       haus connects to the Miniserver's websocket with token authentication,
       enables binary status updates, and stores value events for the state
-      UUIDs of the configured sensors (at least every series Stats4Lox
-      recorded). Events for UUIDs not configured are ignored.
+      UUIDs of the configured sensors: every series a Stats4Lox logger still
+      records, unless retired on purpose in LOXONE_MAP (series a logger
+      stopped recording, or that are not room measurements), each named at
+      startup as mapped, unmapped or retired. Events for UUIDs not
+      configured are ignored.
       Verified here against an in-process fake Miniserver implementing the
       V17.0 protocol; that every real series maps to a state is checked on
       the deployment against the real Miniserver (startup log line
@@ -193,6 +196,23 @@ artifacts:
     links:
       - type: constraint-satisfies
         target: SC-007
+
+  - id: REQ-LOX-005
+    type: requirement
+    title: Loxone sensors without imported history can be followed
+    status: verified
+    release: v0.4.0
+    description: >
+      Controls listed in LOXONE_TRACK are followed live although no history
+      was imported for them (sensors added after a logger stopped, or never
+      logged). Their series take name, room and quantity from the
+      Miniserver's structure file.
+    fields:
+      priority: should
+      category: functional
+    links:
+      - type: traces-to
+        target: REQ-LOX-001
 
   - id: REQ-HEALTH-001
     type: requirement
