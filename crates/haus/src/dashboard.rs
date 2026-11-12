@@ -766,6 +766,7 @@ mod tests {
     // rivet: verifies REQ-STORE-001
     #[tokio::test(flavor = "current_thread")]
     async fn the_runtime_stays_responsive_while_a_long_trend_is_read() {
+        let _serial = crate::state::tests::serial().await;
         let state = test_state("dash-responsive", AppConfig::default());
         let store = state.ingest.store().clone();
         let id = store.ensure_series(&sample()[3].meta).unwrap();

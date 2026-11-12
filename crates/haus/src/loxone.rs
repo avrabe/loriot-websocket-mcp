@@ -940,6 +940,7 @@ mod tests {
     // rivet: verifies DD-004
     #[tokio::test(flavor = "current_thread")]
     async fn a_session_stores_events_of_known_series_only() {
+        let _serial = crate::state::tests::serial().await;
         let logs = global_logs();
         let fake = Fake::new(After::Stay).await;
         let url = serve(fake.clone()).await;
@@ -1013,6 +1014,7 @@ mod tests {
     // rivet: verifies REQ-LOX-003
     #[tokio::test(flavor = "current_thread")]
     async fn reconnects_after_a_drop_or_silence_and_reuses_the_token() {
+        let _serial = crate::state::tests::serial().await;
         for after in [After::Drop, After::Silent, After::PingOnly] {
             let fake = Fake::new(after).await;
             let url = serve(fake.clone()).await;
@@ -1044,6 +1046,7 @@ mod tests {
     // rivet: verifies REQ-LOX-002
     #[tokio::test(flavor = "current_thread")]
     async fn a_different_miniserver_key_is_refused_before_any_login() {
+        let _serial = crate::state::tests::serial().await;
         // First contact with A: its key is remembered with the token.
         let a = Fake::new(After::Stay).await;
         let url_a = serve(a.clone()).await;
@@ -1096,6 +1099,7 @@ mod tests {
     // rivet: verifies REQ-LOX-003
     #[tokio::test(flavor = "current_thread")]
     async fn a_token_close_to_expiry_is_refreshed() {
+        let _serial = crate::state::tests::serial().await;
         let fake = Fake::new(After::Stay).await;
         // The Miniserver hands out a token valid for 2 h: under a day.
         *fake.token_valid_s.lock().unwrap() = 2 * 3600;
@@ -1144,6 +1148,7 @@ mod tests {
     // rivet: partially-verifies REQ-LOX-002
     #[tokio::test(flavor = "current_thread")]
     async fn a_wrong_password_never_connects_and_stores_nothing() {
+        let _serial = crate::state::tests::serial().await;
         let fake = Fake::new(After::Stay).await;
         let url = serve(fake.clone()).await;
         let st = lox_state("lox-badpw");

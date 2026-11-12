@@ -159,6 +159,17 @@ pub(crate) mod tests {
     use haus_core::store::{Source, Store};
     use haus_core::StorageConfig;
 
+    /// Tests that measure timing, and tests that load the CPU (RSA keys,
+    /// 100 000+ points), take this lock so they never run at the same time:
+    /// on a 2-core CI runner a busy neighbour starves a 5 ms ticker and fails
+    /// a responsiveness check that is fine on its own.
+    static SERIAL: std::sync::LazyLock<tokio::sync::Mutex<()>> =
+        std::sync::LazyLock::new(|| tokio::sync::Mutex::new(()));
+
+    pub async fn serial() -> tokio::sync::MutexGuard<'static, ()> {
+        SERIAL.lock().await
+    }
+
     /// A state on temporary files, for tests.
     pub fn test_state(name: &str, config: AppConfig) -> AppState {
         let base = std::env::temp_dir().join(format!(
