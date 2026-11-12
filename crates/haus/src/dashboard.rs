@@ -136,9 +136,51 @@ fn rank(q: Quantity) -> u8 {
     }
 }
 
+/// The path prefix every page URL starts with (`HAUS_BASE_PATH`, REQ-UI-008):
+/// "" or e.g. "/haus". Pages link relatively against `<base href>`, so only
+/// the template needs it.
+static BASE_PATH: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+/// Set once at startup, before the server answers.
+pub fn set_base_path(base: &str) {
+    let _ = BASE_PATH.set(base.to_string());
+}
+
+fn base_href() -> String {
+    format!("{}/", BASE_PATH.get().map(String::as_str).unwrap_or(""))
+}
+
+/// `HAUS_BASE_PATH`: unset, empty or "/" is no prefix; otherwise "/" followed
+/// by segments of letters, digits, '-', '_' and '.', without "." or "..".
+/// A trailing "/" is dropped.
+pub fn parse_base_path(v: Option<&str>) -> Result<String, String> {
+    let v = v.unwrap_or("").trim();
+    let v = v.strip_suffix('/').unwrap_or(v);
+    if v.is_empty() {
+        return Ok(String::new());
+    }
+    let ok = v.starts_with('/')
+        && v[1..].split('/').all(|seg| {
+            !seg.is_empty()
+                && seg != "."
+                && seg != ".."
+                && seg
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c))
+        });
+    if ok {
+        Ok(v.to_string())
+    } else {
+        Err(format!(
+            "HAUS_BASE_PATH {v:?}: expected a path like /haus (letters, digits, - _ . between slashes)"
+        ))
+    }
+}
+
 fn page(title: &str, body: &str) -> Html<String> {
     Html(
-        PAGE.replace("{{TITLE}}", &esc(title))
+        PAGE.replace("{{BASE}}", &esc(&base_href()))
+            .replace("{{TITLE}}", &esc(title))
             .replace("{{VERSION}}", env!("CARGO_PKG_VERSION"))
             .replace("{{BODY}}", body),
     )
@@ -199,7 +241,7 @@ pub fn render_overview(
             .push(v);
     }
     let mut s = String::from(
-        r#"<div id="overview" hx-get="/partials/overview" hx-trigger="every 30s" hx-swap="outerHTML">"#,
+        r#"<div id="overview" hx-get="partials/overview" hx-trigger="every 30s" hx-swap="outerHTML">"#,
     );
     s += &source_chips(live);
     let room_names: std::collections::HashSet<&str> = rooms.keys().map(String::as_str).collect();
@@ -242,7 +284,7 @@ pub fn render_overview(
             };
             let what = what(&v.meta, &room);
             s += &format!(
-                r#"<li{}><a href="/sensor/{}"><span class="label">{}</span><span class="val">{}</span><span class="age">{}</span></a></li>"#,
+                r#"<li{}><a href="sensor/{}"><span class="label">{}</span><span class="val">{}</span><span class="age">{}</span></a></li>"#,
                 if stale { r#" class="stale""# } else { "" },
                 v.id,
                 esc(&what),
@@ -316,7 +358,7 @@ pub fn render_sensor(
     );
     for (k, _, l) in chart::RANGES {
         s += &format!(
-            r#"<a href="/sensor/{}?range={k}"{}>{l}</a>"#,
+            r#"<a href="sensor/{}?range={k}"{}>{l}</a>"#,
             v.id,
             if k == range_key { r#" class="on""# } else { "" }
         );
@@ -362,7 +404,7 @@ pub fn render_status(
                 .map(|(ts, x)| (value(x, &v.meta.unit), age(now_ms, ts)))
                 .unwrap_or_else(|| ("–".into(), "no data".into()));
             s += &format!(
-                r#"<tr><td><a href="/sensor/{}">{}</a></td><td class="num">{}</td><td>{}</td></tr>"#,
+                r#"<tr><td><a href="sensor/{}">{}</a></td><td class="num">{}</td><td>{}</td></tr>"#,
                 v.id,
                 esc(&v.meta.name),
                 esc(&val),
@@ -381,7 +423,7 @@ pub fn render_status(
             .map(|(ts, x)| (value(x, &v.meta.unit), age(now_ms, ts)))
             .unwrap_or_else(|| ("–".into(), "no data".into()));
         s += &format!(
-            r#"<tr{}><td>{}</td><td><a href="/sensor/{}">{}</a></td><td>{}</td><td class="num">{}</td><td>{}</td></tr>"#,
+            r#"<tr{}><td>{}</td><td><a href="sensor/{}">{}</a></td><td>{}</td><td class="num">{}</td><td>{}</td></tr>"#,
             if is_stale(v, live, now_ms) {
                 r#" class="stale""#
             } else {
@@ -692,9 +734,9 @@ mod tests {
         let cellar = html.find("<h2>Cellar</h2>").expect("Cellar room");
         let room_a = html.find("<h2>Room A</h2>").expect("Room A room");
         assert!(cellar < room_a);
-        assert!(!html.contains("/sensor/2\""), "battery on the overview");
+        assert!(!html.contains("sensor/2\""), "battery on the overview");
         // Temperature before humidity within a room.
-        assert!(html.find("/sensor/1\"").unwrap() < html.find("/sensor/0\"").unwrap());
+        assert!(html.find("sensor/1\"").unwrap() < html.find("sensor/0\"").unwrap());
         // Values with units and ages.
         assert!(
             html.contains("18.9 °C") && html.contains("2 min ago"),
@@ -702,7 +744,7 @@ mod tests {
         );
         // LoRaWAN humidity 2 h old: stale. Loxone 5 h old while connected: not.
         let li = |id: u32| {
-            let i = html.find(&format!("/sensor/{id}\"")).unwrap();
+            let i = html.find(&format!("sensor/{id}\"")).unwrap();
             html[..i]
                 .rfind("<li")
                 .map(|j| html[j..i].to_string())
@@ -712,14 +754,14 @@ mod tests {
         assert!(!li(1).contains("stale"));
         assert!(!li(3).contains("stale"));
         // No value yet, or silent for months: not on the overview.
-        assert!(!html.contains("/sensor/5\""));
+        assert!(!html.contains("sensor/5\""));
         let mut old = sample();
         old[1].latest = Some((NOW - OVERVIEW_MAX_AGE_MS - 1, 5.0));
-        assert!(!render_overview(&old, live, NOW, &[]).contains("/sensor/1\""));
+        assert!(!render_overview(&old, live, NOW, &[]).contains("sensor/1\""));
         // Names are escaped.
         assert!(html.contains("Valve &lt;b&gt;") && !html.contains("Valve <b>"));
         // The overview refreshes itself.
-        assert!(html.contains(r#"hx-get="/partials/overview""#));
+        assert!(html.contains(r#"hx-get="partials/overview""#));
 
         // Loxone down: every Loxone value is stale, LoRaWAN unaffected.
         let html = render_overview(
@@ -732,7 +774,7 @@ mod tests {
             &[],
         );
         assert!(html.contains("Loxone not connected"));
-        let i = html.find("/sensor/3\"").unwrap();
+        let i = html.find("sensor/3\"").unwrap();
         assert!(html[html[..i].rfind("<li").unwrap()..i].contains("stale"));
     }
 
@@ -752,9 +794,9 @@ mod tests {
         assert!(html.contains("LoRaWAN not connected") && html.contains("Loxone connected"));
         assert!(html.contains("<h2>Batteries</h2>") && html.contains("3.1 V"));
         // The series without data comes first, then the oldest.
-        let first = html.find("/sensor/5\"").unwrap();
-        let oldest = html.find("/sensor/3\"").unwrap();
-        let newest = html.find("/sensor/1\"").unwrap();
+        let first = html.find("sensor/5\"").unwrap();
+        let oldest = html.find("sensor/3\"").unwrap();
+        let newest = html.find("sensor/1\"").unwrap();
         assert!(first < oldest && oldest < newest);
     }
 
@@ -777,7 +819,7 @@ mod tests {
             NOW,
         );
         assert!(html.contains("<svg") && html.contains(r#"class="line""#));
-        assert!(html.contains(r#"href="/sensor/1?range=24h" class="on""#));
+        assert!(html.contains(r#"href="sensor/1?range=24h" class="on""#));
         assert!(html.contains("2 min ago"));
         for (k, _, _) in chart::RANGES {
             assert!(html.contains(&format!("range={k}")));
@@ -849,7 +891,7 @@ mod tests {
     fn the_only_script_is_the_vendored_htmx() {
         let page = page("t", "b").0;
         assert_eq!(page.matches("<script").count(), 1, "{page}");
-        assert!(page.contains(r#"<script src="/static/htmx-2.0.4.min.js" defer>"#));
+        assert!(page.contains(r#"<script src="static/htmx-2.0.4.min.js" defer>"#));
         assert!(!page.contains("wasm"));
         // The vendored file is the published htmx 2.0.4 (sha256 checked
         // against unpkg when vendored).
@@ -864,6 +906,44 @@ mod tests {
             "Trunk.toml",
         ] {
             assert!(!root.join(f).exists(), "{f} is back");
+        }
+    }
+
+    // rivet: verifies REQ-UI-008
+    // rivet: verifies DD-015
+    #[test]
+    fn pages_link_relative_to_the_base_path() {
+        assert_eq!(parse_base_path(None).unwrap(), "");
+        for empty in ["", "/", " "] {
+            assert_eq!(parse_base_path(Some(empty)).unwrap(), "", "{empty:?}");
+        }
+        assert_eq!(parse_base_path(Some("/haus")).unwrap(), "/haus");
+        assert_eq!(parse_base_path(Some("/haus/")).unwrap(), "/haus");
+        assert_eq!(parse_base_path(Some("/a/b-c_1.2")).unwrap(), "/a/b-c_1.2");
+        for bad in ["haus", "/haus//x", "/../x", "/a/.", "/ha us", "/h\"x", "//"] {
+            assert!(parse_base_path(Some(bad)).is_err(), "{bad:?}");
+        }
+        // The template is the only place with the prefix: no other URL in
+        // a page or partial starts with "/".
+        let page = page("t", "b").0;
+        assert!(page.contains(r#"<base href="/">"#), "{page}");
+        let live = Live {
+            loriot: true,
+            loxone: Some(true),
+        };
+        let views = sample();
+        let pages = [
+            page,
+            render_overview(&views, live, NOW, &[]),
+            render_sensor(&views[1], &[], "24h", 86_400_000, live, NOW),
+            render_status(&views, live, NOW, "x", &[]),
+        ];
+        assert!(pages[1].contains(r#"href="sensor/1""#), "{}", pages[1]);
+        for html in pages {
+            let html = html.replacen(r#"<base href="/">"#, "", 1);
+            for attr in ["href=\"/", "src=\"/", "hx-get=\"/", "action=\"/"] {
+                assert!(!html.contains(attr), "{attr} in {html}");
+            }
         }
     }
 

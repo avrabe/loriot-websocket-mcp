@@ -290,6 +290,24 @@ artifacts:
       priority: must
       category: constraint
 
+  - id: REQ-UI-008
+    type: requirement
+    title: Served under a path prefix behind a reverse proxy
+    status: implemented
+    release: v0.4.0
+    description: >
+      With HAUS_BASE_PATH set (e.g. /haus), every page, partial, static file,
+      API and SSE route answers under that prefix and every URL a page
+      generates points there, so a reverse proxy can forward /haus/* with the
+      prefix kept. /health also stays at the root. Without the setting
+      nothing moves. A malformed prefix stops startup.
+    fields:
+      priority: must
+      category: functional
+    links:
+      - type: traces-to
+        target: REQ-UI-001
+
   # --- Release and retirement ---
   - id: REQ-DEPLOY-001
     type: requirement
