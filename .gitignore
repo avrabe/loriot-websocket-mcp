@@ -35,3 +35,5 @@ tageswerte_KL_*/
 
 # Logs
 *.log
+# Browser screenshots (may show real data)
+.playwright-mcp/

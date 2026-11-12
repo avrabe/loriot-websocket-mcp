@@ -4,6 +4,7 @@
 //! and reports each source's connection state on `/health`.
 
 mod api;
+mod dashboard;
 mod import_cmd;
 mod loxone;
 mod sse;
@@ -249,6 +250,12 @@ async fn run() -> anyhow::Result<()> {
         .route("/api/devices/{eui}", get(api::get_device_stats))
         .route("/api/analytics", get(api::get_analytics))
         .route("/api/analytics/{eui}", get(api::get_device_analytics))
+        // Dashboard (server-rendered, REQ-UI-001..004)
+        .route("/", get(dashboard::overview_page))
+        .route("/partials/overview", get(dashboard::overview_partial))
+        .route("/sensor/{id}", get(dashboard::sensor_page))
+        .route("/status", get(dashboard::status_page))
+        .route("/static/{name}", get(dashboard::static_file))
         // SSE routes
         .route("/sse/readings", get(sse::readings_stream))
         .route("/sse/status", get(sse::status_stream))

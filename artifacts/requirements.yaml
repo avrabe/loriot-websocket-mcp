@@ -52,7 +52,7 @@ artifacts:
   - id: REQ-STORE-001
     type: requirement
     title: The full history is stored durably and queried without stalling
-    status: implemented
+    status: verified
     release: v0.4.0
     description: >
       All points of all series are kept on disk. Range queries read only the
@@ -214,7 +214,7 @@ artifacts:
   - id: REQ-UI-001
     type: requirement
     title: Overview of all rooms
-    status: approved
+    status: verified
     release: v0.4.0
     description: >
       One page lists every room with its latest temperature, humidity and
@@ -229,7 +229,7 @@ artifacts:
   - id: REQ-UI-002
     type: requirement
     title: Sensor detail with trends
-    status: approved
+    status: verified
     release: v0.4.0
     description: >
       Per sensor, server-rendered SVG trends for 1 h, 24 h, 7 d and 90 d,
@@ -244,7 +244,7 @@ artifacts:
   - id: REQ-UI-003
     type: requirement
     title: Health page for sensors and sources
-    status: approved
+    status: verified
     release: v0.4.0
     description: >
       Connection state per source, last value age per sensor, battery voltage
@@ -261,7 +261,7 @@ artifacts:
   - id: REQ-UI-004
     type: requirement
     title: The dashboard builds without wasm or npm
-    status: approved
+    status: verified
     release: v0.4.0
     description: >
       Pages are rendered by the server; the only browser script is vendored htmx

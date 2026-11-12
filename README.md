@@ -7,11 +7,9 @@ REST/SSE API and a web dashboard, and is a single static binary meant to run
 under systemd, for example on a Raspberry Pi 4.
 
 > **Status: v0.4.0 in progress.** This repository was `loriot-server` up to
-> 0.3.0. The rename is done; the new store, the Loxone source, the imports and
-> the server-rendered dashboard are being built (milestone
-> [v0.4.0](https://github.com/avrabe/loriot-websocket-mcp/milestone/1), scope in
-> rivet: `rivet release status v0.4.0`). Until the dashboard lands, `main`
-> serves the API only. Use the 0.3.0 release for a working dashboard.
+> 0.3.0. Milestone
+> [v0.4.0](https://github.com/avrabe/loriot-websocket-mcp/milestone/1); scope
+> and readiness in rivet: `rivet release status v0.4.0`.
 
 ## What is in the workspace
 
@@ -84,6 +82,19 @@ ones a Stats4Lox import created, keyed by control UUID and field. A field
 controller's outputs, need a `LOXONE_MAP` entry naming the state. At startup
 haus logs `Loxone: N of M series mapped to states` and every series it
 could not map.
+
+### The dashboard
+
+| Page | |
+|------|-|
+| `/` | every room with its temperature, humidity and heating values, each with its age; values that no longer describe now are marked stale; refreshes every 30 s |
+| `/sensor/<id>?range=1h\|24h\|7d\|90d` | one series: current value, when it was measured, its trend |
+| `/status` | source connections, battery voltages, every series' last value, oldest first |
+
+Pages are rendered by the server. The only script is the vendored htmx
+2.0.4, and the release builds with cargo alone. A trend line breaks where
+there was no data: a LoRaWAN value stands for 30 minutes, a Loxone value
+(sent only on change) for 24 hours.
 
 ### Importing history
 

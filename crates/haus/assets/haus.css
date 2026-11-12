@@ -1,0 +1,55 @@
+/* haus: one page per question, every value with its age. */
+:root {
+  --bg: #f6f3ee; --surface: #fffdf9; --border: #e4ddd2; --text: #2b2620; --dim: #786e62;
+  --accent: #c2410c; --cool: #2563eb; --ok: #15803d; --warn: #b45309; --stale: #a8a29e;
+  --mono: ui-monospace, 'SF Mono', Menlo, monospace;
+  --sans: system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #15130f; --surface: #1d1a15; --border: #2f2a23; --text: #ece6dc; --dim: #a0968a;
+    --accent: #fb923c; --cool: #60a5fa; --ok: #4ade80; --warn: #fbbf24; --stale: #6b645c;
+  }
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: var(--bg); color: var(--text); font: 15px/1.5 var(--sans); min-height: 100vh; }
+a { color: inherit; text-decoration: none; }
+.top { display: flex; align-items: baseline; gap: 1.5rem; padding: 1rem 16px; border-bottom: 1px solid var(--border); }
+.brand { font-weight: 700; font-size: 1.2rem; color: var(--accent); }
+.top nav a { margin-right: 1rem; color: var(--dim); }
+.top nav a:hover { color: var(--text); }
+main { max-width: 1100px; margin: 0 auto; padding: 1rem 16px 3rem; }
+footer { text-align: center; color: var(--dim); font-size: .8rem; padding: 1rem; }
+h1 { font-size: 1.4rem; margin-bottom: .75rem; }
+h2 { font-size: 1.05rem; margin-bottom: .5rem; }
+.sources { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: 1rem; }
+.chip { border: 1px solid var(--border); border-radius: 999px; padding: .1rem .7rem; font-size: .85rem; background: var(--surface); }
+.chip.up::before { content: "● "; color: var(--ok); }
+.chip.down::before { content: "● "; color: var(--warn); }
+.rooms { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: .75rem; }
+.room { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: .8rem 1rem; }
+.room ul { list-style: none; }
+.room li a { display: grid; grid-template-columns: 1fr auto; column-gap: .5rem; padding: .25rem 0; }
+.room li a:hover .val { color: var(--accent); }
+.label { color: var(--dim); }
+.val { font-family: var(--mono); font-variant-numeric: tabular-nums; text-align: right; }
+.age { grid-column: 1 / -1; font-size: .75rem; color: var(--dim); }
+.stale .val, .stale .age { color: var(--stale); }
+.stale .age::after { content: " · stale"; }
+.ranges { display: flex; gap: .5rem; margin: .5rem 0 1rem; }
+.ranges a { border: 1px solid var(--border); border-radius: 6px; padding: .1rem .6rem; color: var(--dim); }
+.ranges a.on { color: var(--text); border-color: var(--accent); }
+.chart { width: 100%; height: auto; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; }
+.chart .line { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; }
+.chart .axis { stroke: var(--border); }
+.chart .tick, .chart .nodata { fill: var(--dim); font: 11px var(--sans); }
+.chart .nodata { text-anchor: middle; }
+.facts { display: flex; flex-wrap: wrap; gap: 1.5rem; margin-bottom: .5rem; color: var(--dim); }
+.facts b { color: var(--text); font-family: var(--mono); }
+table { width: 100%; border-collapse: collapse; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 1.5rem; }
+th, td { text-align: left; padding: .4rem .7rem; border-bottom: 1px solid var(--border); }
+th { color: var(--dim); font-weight: 600; font-size: .85rem; }
+td.num { font-family: var(--mono); text-align: right; }
+tr.stale td { color: var(--stale); }
+.empty { color: var(--dim); padding: 2rem 0; }
+@media (max-width: 600px) { .top { gap: .8rem; } table { font-size: .85rem; } }
