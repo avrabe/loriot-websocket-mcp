@@ -41,6 +41,7 @@ LORIOT_WS_TOKEN=... BIND=127.0.0.1 PORT=3000 ./haus
 | `LOXONE_KEY_SHA256` | (trust on first use)         | SHA-256 of the Miniserver's public key; a different key is refused before any login |
 | `BIND`            | `HOST`, else `0.0.0.0`         | listen address, e.g. `127.0.0.1` behind a reverse proxy |
 | `PORT`            | `3000`                         | listen port |
+| `HAUS_BASE_PATH`  | (none)                         | path prefix such as `/haus` when a reverse proxy forwards `/haus/*` with the prefix kept (Caddy `handle /haus/*`, not `handle_path`); every route and link moves under it, `/health` also stays at the root |
 | `RUST_LOG`        | `haus=debug,tower_http=info`   | log filter ([`EnvFilter`](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html) syntax) |
 
 `haus --version` prints `haus <version>`; `--help` lists the variables above

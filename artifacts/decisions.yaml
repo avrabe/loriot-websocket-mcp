@@ -384,3 +384,33 @@ artifacts:
         target: REQ-WARN-005
       - type: traces-to
         target: REQ-WOHL-001
+
+  - id: DD-015
+    type: design-decision
+    title: Path prefix kept by the proxy, pages link relative to a base href
+    status: implemented
+    release: v0.4.0
+    description: >
+      haus mounts its routes under HAUS_BASE_PATH and pages carry
+      <base href="{prefix}/"> with relative links.
+    fields:
+      decision: >
+        The router is nested under the prefix ({prefix} and {prefix}/ both
+        serve the overview); /health is served at the root and under the
+        prefix. The page template is the only place that names the prefix:
+        links, static files and htmx requests are relative and resolve
+        against <base href>. The proxy forwards the path unchanged
+        (Caddy `handle /haus/*`, not `handle_path`).
+      rationale: >
+        With the prefix kept, the URL haus sees is the URL the browser
+        used, so redirects, cookie paths and OIDC callback URLs for a later
+        login are right without proxy headers; direct access on the port
+        and access through the proxy show the same links.
+      alternatives: >
+        Proxy strips the prefix and haus only rewrites links (pages then
+        break on direct access, and a login callback must be told the
+        outside path); X-Forwarded-Prefix per request (depends on the proxy
+        setting it and on trusting it).
+    links:
+      - type: satisfies
+        target: REQ-UI-008

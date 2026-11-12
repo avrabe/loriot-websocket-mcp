@@ -46,6 +46,8 @@ Environment:
                    settings (outdoor, frost_c, mould_rh, cold_c, warm_c)
   LOXONE_TRACK     control uuids (comma separated) to follow live although no
                    history was imported; name and room come from the Miniserver
+  HAUS_BASE_PATH   path prefix behind a reverse proxy that keeps it, e.g. /haus:
+                   every route and link is served under it (default none)
   BIND             listen address (falls back to HOST, default 0.0.0.0)
   PORT             listen port (default 3000)
   RUST_LOG         log filter (default haus=debug,tower_http=info)";
@@ -144,6 +146,21 @@ fn with_http_layers(app: Router, health: Router) -> Router {
             .allow_methods(Any)
             .allow_headers(Any),
     )
+}
+
+/// Serves `app` under `base` ("" or e.g. "/haus", REQ-UI-008): `{base}` and
+/// `{base}/` both answer with the overview, `/health` stays at the root for
+/// local watchdogs and is also at `{base}/health` for the proxy.
+/// `root_page` is a router with the overview at `/`.
+fn mount(base: &str, app: Router, root_page: Router, health: Router) -> Router {
+    if base.is_empty() {
+        return with_http_layers(app, health);
+    }
+    let app = Router::new()
+        .nest(&format!("{base}/"), root_page)
+        .nest(base, app);
+    let health = health.clone().merge(Router::new().nest(base, health));
+    with_http_layers(app, health)
 }
 
 /// One source's entry in `/health`.
@@ -281,6 +298,10 @@ async fn run() -> anyhow::Result<()> {
         None => haus_core::warn::WarnConfig::default(),
     };
 
+    let base_path = dashboard::parse_base_path(std::env::var("HAUS_BASE_PATH").ok().as_deref())
+        .map_err(|e| anyhow::anyhow!(e))?;
+    dashboard::set_base_path(&base_path);
+
     // Create shared application state
     let mut state = AppState::new(storage, device_names, config.clone(), ingest, sources);
     state.warn = std::sync::Arc::new(warn_cfg);
@@ -311,7 +332,13 @@ async fn run() -> anyhow::Result<()> {
     let health_router = Router::new()
         .route("/health", get(health))
         .with_state(state.clone());
-    let app = with_http_layers(app, health_router);
+    let root_page = Router::new()
+        .route("/", get(dashboard::overview_page))
+        .with_state(state.clone());
+    let app = mount(&base_path, app, root_page, health_router);
+    if !base_path.is_empty() {
+        tracing::info!("Serving under {base_path}/");
+    }
 
     // Spawn the Loriot WebSocket handler
     let ws_state = state.clone();
@@ -493,6 +520,53 @@ mod tests {
         );
         assert!(log.contains("finished processing request"), "{log}");
         assert!(!log.contains("/health"), "/health was logged:\n{log}");
+    }
+
+    // rivet: verifies REQ-UI-008
+    // rivet: verifies DD-015
+    #[tokio::test]
+    async fn base_path_mounts_every_route_under_it() {
+        use axum::{body::Body, http::Request};
+        use tower::ServiceExt;
+
+        let app = || {
+            Router::new()
+                .route("/", get(|| async { "overview" }))
+                .route("/status", get(|| async { "status" }))
+                .route("/static/{name}", get(|| async { "file" }))
+        };
+        let root = || Router::new().route("/", get(|| async { "overview" }));
+        let health = || Router::new().route("/health", get(|| async { "ok" }));
+        let status = |app: &Router, uri: &str| {
+            let app = app.clone();
+            let uri = uri.to_string();
+            async move {
+                app.oneshot(Request::get(uri).body(Body::empty()).unwrap())
+                    .await
+                    .unwrap()
+                    .status()
+            }
+        };
+        let served = mount("/haus", app(), root(), health());
+        for uri in [
+            "/haus",
+            "/haus/",
+            "/haus/status",
+            "/haus/static/haus.css",
+            "/haus/health",
+            "/health",
+        ] {
+            assert_eq!(status(&served, uri).await, StatusCode::OK, "{uri}");
+        }
+        for uri in ["/", "/status", "/static/haus.css", "/hausx/status"] {
+            assert_eq!(status(&served, uri).await, StatusCode::NOT_FOUND, "{uri}");
+        }
+        // Without a base path nothing moves.
+        let plain = mount("", app(), root(), health());
+        for uri in ["/", "/status", "/health"] {
+            assert_eq!(status(&plain, uri).await, StatusCode::OK, "{uri}");
+        }
+        assert_eq!(status(&plain, "/haus/status").await, StatusCode::NOT_FOUND);
     }
 
     // rivet: verifies REQ-HEALTH-001
