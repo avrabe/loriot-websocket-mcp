@@ -102,6 +102,8 @@ pub async fn house_page() -> Response {
 pub struct SeriesOut {
     pub id: u32,
     pub name: String,
+    /// "Temperature · Spiegel": what the room overview shows (REQ-UI-007).
+    pub label: String,
     pub quantity: String,
     pub value: Option<f64>,
     pub unit: String,
@@ -178,6 +180,10 @@ pub fn rooms(
                 SeriesOut {
                     id: s.id,
                     name: s.meta.name.clone(),
+                    label: crate::dashboard::what(
+                        &s.meta,
+                        s.meta.room.as_deref().unwrap_or(&s.meta.name),
+                    ),
                     quantity: quantity(s.meta.quantity).into(),
                     value: s.latest.map(|(_, x)| x),
                     unit: s.meta.unit.clone(),

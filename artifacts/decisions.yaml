@@ -488,3 +488,39 @@ artifacts:
         target: REQ-UI-006
       - type: satisfies
         target: REQ-UI-004
+
+  - id: DD-018
+    type: design-decision
+    title: Labels from the source name without room and quantity, overridable per series
+    status: implemented
+    release: v0.5.0
+    description: >
+      The room overview, the sensor page and the house view label a series
+      "<quantity> · <sensor>", where the sensor part is what the source name
+      says beyond the room and the quantity.
+    fields:
+      decision: >
+        haus_core::label::short removes from the source's name the room's
+        words (as a whole word sequence, any case) and the words that only
+        restate the quantity (German and English, e.g. Temperatur,
+        Luftfeuchte, Ventil), then separators left at either end; when nothing
+        is left only the quantity shows. HAUS_LABELS, an optional JSON file
+        {"<uuid or EUI>/<field>": "label"} keyed like LOXONE_MAP, sets the
+        sensor part of any series and wins over the derived one; a bad file
+        stops startup naming the key. The source name itself is unchanged in
+        the store, the warnings and the status page, and the house view shows
+        it as the link's title.
+      rationale: >
+        The page already says the room (card heading) and the quantity (first
+        word), so repeating them is noise; what is left is what tells two
+        sensors in a room apart ("Touch Spiegel", "Fußboden"). The warning
+        rules match not_air patterns against the source name, so that name
+        must stay the one stored.
+      alternatives: >
+        Building labels from the structure file's category (Loxone names its
+        categories per installation, so it says little); renaming series in
+        the store (names are display data that may change; series identity is the source id); labels
+        only from an operator file (every new sensor would need an entry).
+    links:
+      - type: satisfies
+        target: REQ-UI-007
