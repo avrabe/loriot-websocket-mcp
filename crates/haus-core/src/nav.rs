@@ -203,4 +203,165 @@ mod tests {
         .unwrap_err()
         .starts_with("apps"));
     }
+
+    /// One way to break the example file.
+    type Edit = Box<dyn Fn(&mut serde_json::Value)>;
+
+    // The refusal table of warte's tests/nav.rs at pulseengine/warte
+    // ec989cb (v1.6.25), case for case, so both apps refuse the same files.
+    // Here apps[0] is this app ("haus"), as "warte" is apps[0] there.
+    // rivet: verifies REQ-UI-009
+    // rivet: verifies DD-016
+    #[test]
+    fn warte_refusal_cases_are_refused_here_too() {
+        let example = || -> serde_json::Value {
+            serde_json::json!({"version": 1, "home": {"name": "tower", "url": "/"},
+              "apps": [{"id": "haus", "name": "haus", "url": "/haus/", "desc": "climate"},
+                       {"id": "photos", "name": "photos", "url": "/photos/"},
+                       {"id": "login", "name": "login", "url": "https://login.example.org/"}]})
+        };
+        let check = |v: &serde_json::Value| parse(&v.to_string(), "haus");
+        let long = "x".repeat(41);
+        let many: Vec<serde_json::Value> = (0..21)
+            .map(|i| serde_json::json!({"id": format!("a{i}"), "name": "a", "url": "/"}))
+            .collect();
+        let cases: Vec<(&str, Edit, &str)> = vec![
+            (
+                "version 2",
+                Box::new(|v| v["version"] = 2.into()),
+                "version",
+            ),
+            (
+                "unknown top key",
+                Box::new(|v| v["extra"] = 1.into()),
+                "extra",
+            ),
+            (
+                "unknown home key",
+                Box::new(|v| v["home"]["x"] = 1.into()),
+                "x",
+            ),
+            (
+                "unknown app key",
+                Box::new(|v| v["apps"][0]["icon"] = "i".into()),
+                "icon",
+            ),
+            (
+                "missing url",
+                Box::new(|v| {
+                    v["apps"][0].as_object_mut().unwrap().remove("url");
+                }),
+                "url",
+            ),
+            (
+                "uppercase id",
+                Box::new(|v| v["apps"][0]["id"] = "Haus".into()),
+                "apps[0].id",
+            ),
+            (
+                "empty id",
+                Box::new(|v| v["apps"][0]["id"] = "".into()),
+                "apps[0].id",
+            ),
+            (
+                "long id",
+                Box::new(|v| v["apps"][0]["id"] = "a".repeat(33).into()),
+                "apps[0].id",
+            ),
+            (
+                "duplicate id",
+                Box::new(|v| v["apps"][1]["id"] = "haus".into()),
+                "apps[1].id",
+            ),
+            (
+                "blank name",
+                Box::new(|v| v["apps"][1]["name"] = "  ".into()),
+                "apps[1].name",
+            ),
+            (
+                "long name",
+                Box::new(move |v| v["apps"][1]["name"] = long.clone().into()),
+                "apps[1].name",
+            ),
+            (
+                "long home name",
+                Box::new(|v| v["home"]["name"] = "y".repeat(41).into()),
+                "home.name",
+            ),
+            (
+                "protocol-relative",
+                Box::new(|v| v["apps"][1]["url"] = "//evil.example/".into()),
+                "apps[1].url",
+            ),
+            (
+                "http",
+                Box::new(|v| v["apps"][1]["url"] = "http://a.example/".into()),
+                "apps[1].url",
+            ),
+            (
+                "javascript",
+                Box::new(|v| v["apps"][1]["url"] = "javascript:alert(1)".into()),
+                "apps[1].url",
+            ),
+            (
+                "relative",
+                Box::new(|v| v["apps"][1]["url"] = "photos/".into()),
+                "apps[1].url",
+            ),
+            (
+                "space",
+                Box::new(|v| v["apps"][1]["url"] = "/a b".into()),
+                "apps[1].url",
+            ),
+            (
+                "quote",
+                Box::new(|v| v["apps"][1]["url"] = "/a\"b".into()),
+                "apps[1].url",
+            ),
+            (
+                "angle",
+                Box::new(|v| v["apps"][1]["url"] = "/a<b".into()),
+                "apps[1].url",
+            ),
+            (
+                "home url",
+                Box::new(|v| v["home"]["url"] = "//x".into()),
+                "home.url",
+            ),
+            (
+                "long desc",
+                Box::new(|v| v["apps"][0]["desc"] = "d".repeat(121).into()),
+                "apps[0].desc",
+            ),
+            (
+                "no apps",
+                Box::new(|v| v["apps"] = serde_json::json!([])),
+                "apps",
+            ),
+            (
+                "21 apps",
+                Box::new(move |v| v["apps"] = many.clone().into()),
+                "apps",
+            ),
+            (
+                "self absent",
+                Box::new(|v| v["apps"][0]["id"] = "other".into()),
+                "self",
+            ),
+        ];
+        assert_eq!(cases.len(), 24);
+        check(&example()).unwrap();
+        for (what, edit, field) in cases {
+            let mut v = example();
+            edit(&mut v);
+            let err = check(&v).expect_err(what);
+            assert!(err.contains(field), "{what}: {err:?} does not name {field}");
+        }
+        // The limits themselves pass.
+        let mut v = example();
+        v["apps"][1]["name"] = "n".repeat(40).into();
+        v["apps"][1]["id"] = "a".repeat(32).into();
+        v["apps"][1]["desc"] = "d".repeat(120).into();
+        check(&v).unwrap();
+    }
 }

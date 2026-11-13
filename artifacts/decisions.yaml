@@ -438,7 +438,8 @@ artifacts:
       rationale: >
         One file for every app on the host, written by the operator from the
         same list as the landing page; identical checks in both apps mean a
-        file works everywhere or nowhere.
+        file works everywhere or nowhere. haus runs warte's 24 refusal cases
+        (tests/nav.rs at pulseengine/warte ec989cb) as its own test.
       alternatives: >
         Links from environment variables per app; a switcher served by the
         reverse proxy (needs response rewriting).
