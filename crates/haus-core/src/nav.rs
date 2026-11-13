@@ -218,7 +218,7 @@ mod tests {
             serde_json::json!({"version": 1, "home": {"name": "tower", "url": "/"},
               "apps": [{"id": "haus", "name": "haus", "url": "/haus/", "desc": "climate"},
                        {"id": "photos", "name": "photos", "url": "/photos/"},
-                       {"id": "login", "name": "login", "url": "https://login.example.internal/"}]})
+                       {"id": "login", "name": "login", "url": "https://login.example.org/"}]})
         };
         let check = |v: &serde_json::Value| parse(&v.to_string(), "haus");
         let long = "x".repeat(41);
