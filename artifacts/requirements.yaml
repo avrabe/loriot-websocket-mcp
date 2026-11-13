@@ -315,7 +315,8 @@ artifacts:
     release: v0.4.0
     description: >
       With HAUS_NAV (a nav v1 JSON file, the contract shared with warte:
-      `warte docs nav`) and HAUS_NAV_SELF (haus's id in it) set, every page
+      `warte docs nav`, docs/topics/nav.md at pulseengine/warte
+      ec989cb, v1.6.25) and HAUS_NAV_SELF (haus's id in it) set, every page
       header shows a link home and one link per app in file order, haus's
       own marked aria-current, exactly 1 + apps links, URLs as given. A file
       that breaks the contract, or only one of the two settings, stops
