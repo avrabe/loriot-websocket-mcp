@@ -28,6 +28,16 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(dark ? 0x15130f : 0xf6f3ee);
 let [W, H] = size();
 const camera = new THREE.PerspectiveCamera(40, W / H, 0.1, 2000);
+// Portrait (a phone): keep the horizontal angle of a square view, so the
+// house is not cut off at the sides; landscape keeps the 40° vertical angle.
+function fitCamera() {
+  camera.aspect = W / H;
+  camera.fov = camera.aspect < 1
+    ? 2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(20)) / camera.aspect) * 180 / Math.PI
+    : 40;
+  camera.updateProjectionMatrix();
+}
+fitCamera();
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(devicePixelRatio); renderer.setSize(W, H);
 el.appendChild(renderer.domElement);
@@ -333,7 +343,7 @@ renderer.domElement.addEventListener('click', ev => {
   info.style.display = 'block';
 });
 new ResizeObserver(() => {
-  [W, H] = size(); camera.aspect = W / H; camera.updateProjectionMatrix();
+  [W, H] = size(); fitCamera();
   renderer.setSize(W, H); labels.setSize(W, H);
 }).observe(el);
 
