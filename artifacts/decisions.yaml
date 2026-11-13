@@ -446,3 +446,45 @@ artifacts:
     links:
       - type: satisfies
         target: REQ-UI-009
+
+  - id: DD-017
+    type: design-decision
+    title: 3D house view from a private model file, drawn with vendored three.js
+    status: implemented
+    release: v0.5.0
+    description: >
+      haus reads the operator's house model (HAUS_HOUSE_MODEL) once at
+      startup and serves a /house page that draws it in the browser with
+      three.js, each room coloured by its current air temperature.
+    fields:
+      decision: >
+        haus_core::house parses and checks a house model v1 (levels, rooms
+        with plan polygons and the haus rooms whose sensors they hold, other
+        units, buildings with walls and flat/gable/hip/barrel roofs, site,
+        viewpoints; unknown keys and out-of-range values refused naming the
+        field). GET /api/house returns the model and, per room, the climate
+        computed by warn::climate with the warning rules (only series followed
+        live, stuck and silent ones left out, no floor or radiator probes,
+        medians), its series and its warnings; the page refreshes it every
+        minute. three.js 0.160.0 (module, OrbitControls, CSS2DRenderer) is
+        vendored from the npm tarball whose sha512 matched the registry,
+        pinned by sha256 in a test, and loaded through an import map that
+        names only files haus serves. The header links to /house only when a
+        model is configured; without one every other page is unchanged.
+      rationale: >
+        A floor plan with live colours answers "where is it too cold or too
+        damp" at a glance, and the owner approved the look from a private
+        preview. The model describes a real home, so it stays deployment data
+        like every home detail; the repository carries the viewer and a made-up example.
+        Computing the colour with the warning rules means the view and the
+        warnings never disagree about a room.
+      alternatives: >
+        A server-rendered SVG floor plan (no 3D, no shell or surroundings);
+        three.js from a CDN (a runtime dependency on a third party and a
+        privacy leak from the household's browsers); WebGL by hand (far more
+        code to own).
+    links:
+      - type: satisfies
+        target: REQ-UI-006
+      - type: satisfies
+        target: REQ-UI-004

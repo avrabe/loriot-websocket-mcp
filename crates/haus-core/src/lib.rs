@@ -21,6 +21,7 @@ pub mod chart;
 pub mod compare;
 pub mod energy;
 pub mod heatpump;
+pub mod house;
 pub mod import;
 pub mod ingest;
 pub mod loxone;

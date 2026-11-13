@@ -37,7 +37,7 @@ pub struct Live {
     pub loxone: Option<bool>,
 }
 
-fn live(state: &AppState) -> Live {
+pub(crate) fn live(state: &AppState) -> Live {
     Live {
         loriot: state.sources.loriot.connected(),
         loxone: state.sources.loxone.as_ref().map(|h| h.connected()),
@@ -206,7 +206,7 @@ pub fn parse_base_path(v: Option<&str>) -> Result<String, String> {
     }
 }
 
-fn page(title: &str, body: &str) -> Html<String> {
+pub(crate) fn page(title: &str, body: &str) -> Html<String> {
     page_with_nav(
         title,
         body,
@@ -217,6 +217,14 @@ fn page(title: &str, body: &str) -> Html<String> {
 fn page_with_nav(title: &str, body: &str, nav: &str) -> Html<String> {
     Html(
         PAGE.replace("{{BASE}}", &esc(&base_href()))
+            .replace(
+                "{{HOUSE}}",
+                if crate::house_view::configured() {
+                    r#"<a href="house">House</a>"#
+                } else {
+                    ""
+                },
+            )
             .replace("{{NAV}}", nav)
             .replace("{{TITLE}}", &esc(title))
             .replace("{{VERSION}}", env!("CARGO_PKG_VERSION"))
@@ -479,7 +487,7 @@ pub fn render_status(
     s + "</table>"
 }
 
-fn now_ms() -> i64 {
+pub(crate) fn now_ms() -> i64 {
     chrono::Utc::now().timestamp_millis()
 }
 
@@ -514,6 +522,57 @@ async fn views(state: &AppState) -> Result<Vec<SeriesView>, String> {
     run_blocking(move || load_views(&s)).await
 }
 
+/// Every series with its recent points, as the warning rules and the house
+/// view need them; blocking.
+pub(crate) fn series_data(s: &AppState, now: i64) -> Result<Vec<warn::SeriesData>, String> {
+    let store = s.ingest.store();
+    let followed = s
+        .loxone_followed
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
+        .unwrap_or_default();
+    let mut data = Vec::new();
+    for (id, meta) in store.series().map_err(|e| e.to_string())? {
+        // The window, and the value standing at its start (however old:
+        // a sensor stuck for months has no point inside the window).
+        let from = now - warn::window_ms(&s.warn, &meta);
+        let mut recent: Vec<(i64, f64)> = store
+            .before(id, from)
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .collect();
+        recent.extend(store.range(id, from, now).map_err(|e| e.to_string())?);
+        let live = match meta.key.source {
+            Source::Loriot => true,
+            Source::Loxone => {
+                followed.contains(&(meta.key.source_id.clone(), meta.key.field.clone()))
+            }
+        };
+        data.push(warn::SeriesData {
+            id,
+            latest: recent.last().copied(),
+            meta,
+            recent,
+            followed: live,
+        });
+    }
+    Ok(data)
+}
+
+pub(crate) fn evaluate(
+    data: &[warn::SeriesData],
+    lv: Live,
+    now: i64,
+    cfg: &warn::WarnConfig,
+) -> Vec<Warning> {
+    let mut sources = vec![(Source::Loriot, lv.loriot)];
+    if let Some(l) = lv.loxone {
+        sources.push((Source::Loxone, l));
+    }
+    warn::evaluate(data, &sources, now, cfg)
+}
+
 /// The current warnings (REQ-WARN-001), evaluated from the store; blocking
 /// reads off the runtime. An unreadable store gives no warnings, logged.
 pub async fn warnings(state: &AppState) -> Vec<Warning> {
@@ -521,43 +580,8 @@ pub async fn warnings(state: &AppState) -> Vec<Warning> {
     let now = now_ms();
     let lv = live(state);
     let result = run_blocking(move || -> Result<Vec<Warning>, String> {
-        let store = s.ingest.store();
-        let followed = s
-            .loxone_followed
-            .read()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone()
-            .unwrap_or_default();
-        let mut data = Vec::new();
-        for (id, meta) in store.series().map_err(|e| e.to_string())? {
-            // The window, and the value standing at its start (however old:
-            // a sensor stuck for months has no point inside the window).
-            let from = now - warn::window_ms(&s.warn, &meta);
-            let mut recent: Vec<(i64, f64)> = store
-                .before(id, from)
-                .map_err(|e| e.to_string())?
-                .into_iter()
-                .collect();
-            recent.extend(store.range(id, from, now).map_err(|e| e.to_string())?);
-            let live = match meta.key.source {
-                haus_core::store::Source::Loriot => true,
-                haus_core::store::Source::Loxone => {
-                    followed.contains(&(meta.key.source_id.clone(), meta.key.field.clone()))
-                }
-            };
-            data.push(warn::SeriesData {
-                id,
-                latest: recent.last().copied(),
-                meta,
-                recent,
-                followed: live,
-            });
-        }
-        let mut sources = vec![(haus_core::store::Source::Loriot, lv.loriot)];
-        if let Some(l) = lv.loxone {
-            sources.push((haus_core::store::Source::Loxone, l));
-        }
-        Ok(warn::evaluate(&data, &sources, now, &s.warn))
+        let data = series_data(&s, now)?;
+        Ok(evaluate(&data, lv, now, &s.warn))
     })
     .await;
     result.unwrap_or_else(|e| {
@@ -668,7 +692,10 @@ pub async fn static_file(Path(name): Path<String>) -> Response {
     let (body, ctype) = match name.as_str() {
         "haus.css" => (CSS, "text/css; charset=utf-8"),
         "htmx-2.0.4.min.js" => (HTMX, "text/javascript; charset=utf-8"),
-        _ => return StatusCode::NOT_FOUND.into_response(),
+        n => match crate::house_view::ASSETS.iter().find(|(a, _)| *a == n) {
+            Some((_, body)) => (*body, "text/javascript; charset=utf-8"),
+            None => return StatusCode::NOT_FOUND.into_response(),
+        },
     };
     (
         [

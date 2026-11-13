@@ -1,0 +1,59 @@
+{
+  "version": 1,
+  "north_deg": 0,
+  "levels": [
+    { "id": "C", "name": "Cellar", "z": -2.6 },
+    { "id": "G", "name": "Ground floor", "z": 0 },
+    { "id": "U", "name": "Upper floor", "z": 2.8 }
+  ],
+  "rooms": [
+    { "id": "living", "name": "Living room", "level": "G",
+      "poly": [[0, 0], [6, 0], [6, 5], [0, 5]], "haus_rooms": ["Living room"] },
+    { "id": "kitchen", "name": "Kitchen", "level": "G",
+      "poly": [[6, 0], [10, 0], [10, 4], [6, 4]], "haus_rooms": ["Kitchen"] },
+    { "id": "hall", "name": "Hall", "level": "G",
+      "poly": [[6, 4], [10, 4], [10, 8], [0, 8], [0, 5], [6, 5]], "label": [8, 6] },
+    { "id": "bedroom", "name": "Bedroom", "level": "U",
+      "poly": [[0, 0], [5, 0], [5, 4.5], [0, 4.5]], "haus_rooms": ["Bedroom"] },
+    { "id": "bath", "name": "Bathroom", "level": "U",
+      "poly": [[5, 0], [10, 0], [10, 3.5], [5, 3.5]], "haus_rooms": ["Bathroom"] },
+    { "id": "study", "name": "Study", "level": "U",
+      "poly": [[0, 4.5], [5, 4.5], [5, 8], [0, 8]] },
+    { "id": "balcony", "name": "Balcony", "level": "U", "outdoor": true, "deck": true,
+      "poly": [[10, 4], [12, 4], [12, 8], [10, 8]],
+      "note": "Awning and an outdoor light; no climate sensor here." },
+    { "id": "laundry", "name": "Laundry and drying room", "short": "Laundry", "level": "C",
+      "poly": [[0, 0], [5, 0], [5, 4], [0, 4]], "haus_rooms": ["Laundry sensor"] }
+  ],
+  "others": [
+    { "unit": "2", "name": "Flat 2", "level": "U", "poly": [[5, 3.5], [10, 3.5], [10, 8], [5, 8]] },
+    { "name": "Storage", "level": "C", "poly": [[5, 0], [10, 0], [10, 8], [5, 8]], "assumed": true },
+    { "name": "Terrace", "level": "G", "outdoor": true, "poly": [[0, -3], [6, -3], [6, 0], [0, 0]] }
+  ],
+  "buildings": [
+    { "name": "House", "outline": [[0, 0], [10, 0], [10, 8], [0, 8]],
+      "wall_m": 5.8, "roof": "gable", "ridge_m": 9.5, "dormers": [[2, 4]] },
+    { "name": "Garage", "outline": [[13, 0], [16, 0], [16, 6], [13, 6]],
+      "wall_m": 2.6, "roof": "flat" }
+  ],
+  "site": {
+    "parcel": [[-6, -10], [20, -10], [20, 16], [-6, 16]],
+    "streets": [
+      { "name": "Example Road", "kind": "road", "poly": [[-20, -18], [35, -18], [35, -11], [-20, -11]] },
+      { "name": "Footpath", "kind": "path", "poly": [[10.5, -10], [12, -10], [12, 0], [10.5, 0]] }
+    ],
+    "neighbours": [
+      { "name": "No. 3", "poly": [[24, 0], [34, 0], [34, 9], [24, 9]], "height_m": 8 }
+    ],
+    "parking": [
+      { "name": "P1", "poly": [[13, -8], [15.5, -8], [15.5, -3], [13, -3]] },
+      { "name": "P2", "poly": [[15.5, -8], [18, -8], [18, -3], [15.5, -3]] }
+    ],
+    "trees": [[-3, 12], [4, 13], [17, 12]]
+  },
+  "views": [
+    { "name": "From the street", "from_deg": 180, "distance_m": 45, "height_m": 20, "shell": true },
+    { "name": "From the garden", "from_deg": 20, "distance_m": 45, "height_m": 25, "shell": true },
+    { "name": "From above", "from_deg": 0, "distance_m": 0, "height_m": 70 }
+  ]
+}

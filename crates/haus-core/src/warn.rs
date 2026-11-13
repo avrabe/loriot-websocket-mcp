@@ -183,7 +183,7 @@ fn room_of(m: &SeriesMeta) -> &str {
     m.room.as_deref().unwrap_or(&m.name)
 }
 
-fn is_air(cfg: &WarnConfig, m: &SeriesMeta) -> bool {
+pub fn is_air(cfg: &WarnConfig, m: &SeriesMeta) -> bool {
     m.quantity == Quantity::Temperature && !cfg.not_air.iter().any(|p| m.name.contains(p.as_str()))
 }
 
@@ -223,6 +223,72 @@ fn room_air(cfg: &WarnConfig, series: &[&SeriesData], at: i64) -> Option<f64> {
     } else {
         (v[n / 2 - 1] + v[n / 2]) / 2.0
     })
+}
+
+fn median(mut v: Vec<f64>) -> Option<f64> {
+    v.retain(|x| x.is_finite());
+    if v.is_empty() {
+        return None;
+    }
+    v.sort_by(f64::total_cmp);
+    let n = v.len();
+    Some(if n % 2 == 1 {
+        v[n / 2]
+    } else {
+        (v[n / 2 - 1] + v[n / 2]) / 2.0
+    })
+}
+
+/// A room's climate as the 3D view colours it (REQ-UI-006), by the rules
+/// the warnings use: only series followed live, none that is stuck, no
+/// value of a silent LoRaWAN device; the air temperature without floor or
+/// radiator probes. Medians over what is left.
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+pub struct Climate {
+    pub air_c: Option<f64>,
+    pub rh: Option<f64>,
+    /// The series the values come from.
+    pub used: Vec<u32>,
+}
+
+pub fn climate(series: &[&SeriesData], now_ms: i64, cfg: &WarnConfig) -> Climate {
+    let d = &cfg.defaults;
+    let ok: Vec<&SeriesData> = series
+        .iter()
+        .copied()
+        .filter(|s| s.followed)
+        .filter(|s| stuck_since(s, now_ms, d.stuck_hours).is_none())
+        .filter(|s| match (s.meta.key.source, s.latest) {
+            (_, None) => false,
+            (Source::Loriot, Some((t, _))) => (now_ms - t) as f64 <= d.silent_minutes * 60_000.0,
+            (Source::Loxone, Some(_)) => true,
+        })
+        .collect();
+    let air: Vec<&SeriesData> = ok
+        .iter()
+        .copied()
+        .filter(|s| is_air(cfg, &s.meta))
+        .collect();
+    let hum: Vec<&SeriesData> = ok
+        .iter()
+        .copied()
+        .filter(|s| s.meta.quantity == Quantity::Humidity)
+        .collect();
+    let mut used: Vec<u32> = air.iter().chain(&hum).map(|s| s.id).collect();
+    used.sort_unstable();
+    Climate {
+        air_c: median(
+            air.iter()
+                .filter_map(|s| s.latest.map(|(_, v)| v))
+                .collect(),
+        ),
+        rh: median(
+            hum.iter()
+                .filter_map(|s| s.latest.map(|(_, v)| v))
+                .collect(),
+        ),
+        used,
+    }
 }
 
 /// Evaluate every rule at `now_ms`. `connected` holds the configured
@@ -448,6 +514,49 @@ mod tests {
             recent: pts.to_vec(),
             followed: true,
         }
+    }
+
+    // rivet: verifies REQ-UI-006
+    // rivet: verifies DD-017
+    #[test]
+    fn the_house_view_climate_follows_the_warning_rules() {
+        let cfg = WarnConfig::default();
+        const D: i64 = 24 * H;
+        let lox =
+            |id, q, name: &str, pts: &[(i64, f64)]| s(id, Source::Loxone, q, name, "Bath", "", pts);
+        let t = Quantity::Temperature;
+        let air1 = lox(1, t, "Air", &[(NOW - H, 20.0), (NOW - 1000, 20.6)]);
+        let air2 = lox(2, t, "Mobile", &[(NOW - 2 * H, 21.0), (NOW - 1000, 21.4)]);
+        let floor = lox(3, t, "Bath Fußbodenheizung Temperatur", &[(NOW - H, 30.0)]);
+        let stuck = lox(4, t, "Touch", &[(NOW - 80 * D, 27.7), (NOW - H, 27.7)]);
+        let mut retired = lox(5, t, "Old", &[(NOW - H, 10.0)]);
+        retired.followed = false;
+        let rh = lox(6, Quantity::Humidity, "Humidity", &[(NOW - H, 55.0)]);
+        let silent = s(
+            7,
+            Source::Loriot,
+            t,
+            "Radio",
+            "Bath",
+            "",
+            &[(NOW - 5 * H, 5.0)],
+        );
+        let fresh = s(
+            8,
+            Source::Loriot,
+            Quantity::Humidity,
+            "Radio rh",
+            "Bath",
+            "",
+            &[(NOW - 60_000, 65.0)],
+        );
+        let all = [&air1, &air2, &floor, &stuck, &retired, &rh, &silent, &fresh];
+        let c = climate(&all, NOW, &cfg);
+        // Median of 20.6 and 21.4; floor probe, stuck, retired and silent left out.
+        assert_eq!(c.air_c, Some(21.0));
+        assert_eq!(c.rh, Some(60.0));
+        assert_eq!(c.used, vec![1, 2, 6, 8]);
+        assert_eq!(climate(&[&floor, &stuck], NOW, &cfg), Climate::default());
     }
 
     fn kinds(w: &[Warning]) -> Vec<(Kind, String)> {
