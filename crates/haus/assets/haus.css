@@ -86,3 +86,15 @@ nav.apps a[aria-current="page"] { color: inherit; font-weight: 600; }
 .house3d .lbl span { font-weight: 400; color: #57534e; }
 .house3d .tag { font: 500 10px var(--sans); color: #57534e; background: rgba(255, 253, 249, .6); border-radius: 3px; padding: 0 3px; pointer-events: none; }
 .house3d .north { font: 700 13px var(--sans); color: #c2410c; pointer-events: none; }
+.house3d:fullscreen { height: 100vh; border: 0; border-radius: 0; background: var(--bg); }
+.house3d #alerts { position: absolute; top: 10px; right: 10px; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; max-width: calc(100% - 340px); }
+.house3d #alerts:empty { display: none; }
+.house3d #alerts button { background: #b91c1c; color: #fff; border-color: #b91c1c; font-weight: 600; }
+.house3d #alerts button.on { outline: 3px solid var(--text); }
+.house3d .lbl.warned { background: #b91c1c; color: #fff; }
+.house3d .lbl.warned span { color: #fff; }
+.house3d .lbl.current { outline: 2px solid var(--text); font-size: 13px; }
+.house3d.touring #info { width: min(420px, calc(100% - 20px)); font-size: 1.1rem; }
+.house3d.touring #info .warn { font-weight: 700; font-size: 1.15rem; }
+.house3d #tour[aria-pressed=true] { background: var(--text); color: var(--bg); }
+@media (max-width: 700px) { .house3d #alerts { max-width: calc(100% - 20px); top: auto; bottom: 10px; left: 10px; justify-content: flex-start; } }

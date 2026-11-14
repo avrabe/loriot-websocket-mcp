@@ -660,3 +660,25 @@ artifacts:
     links:
       - type: traces-to
         target: REQ-WARN-001
+
+  - id: REQ-UI-010
+    type: requirement
+    title: House view tour, warnings first, full screen
+    status: implemented
+    release: v0.5.0
+    description: >
+      The 3D house view can tour the rooms on its own: every 5, 10, 20 or
+      30 s it flies to the next room with sensors, hides the floors above
+      it and shows its values and warnings. Rooms with a warning come up
+      every other step, and a warning that appears on a refresh is shown at
+      once. Warned rooms glow in their own colour and are listed in a strip
+      on top of the view (a click flies there). house?tour=<seconds> starts
+      the tour with the panel collapsed, for a wall screen; touching the
+      view pauses it for a minute. The view can go full screen (button or
+      f) where the browser supports it.
+    fields:
+      priority: should
+      category: functional
+    links:
+      - type: traces-to
+        target: REQ-UI-006

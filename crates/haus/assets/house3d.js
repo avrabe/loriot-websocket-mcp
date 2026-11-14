@@ -307,7 +307,9 @@ function applyValues() {
     d.dataset.full = esc(r.name) + warned + (parts.length ? ' <span>' + parts.join(' · ') + '</span>' : '');
     d.dataset.compact = esc(r.short || r.name) + warned + (v && v.air_c != null ? ' <span>' + fmt(v.air_c, 0) + '°</span>' : '');
     d.innerHTML = labelMode === 'full' ? d.dataset.full : d.dataset.compact;
+    d.classList.toggle('warned', !!warned);
   }
+  renderAlerts();
   $('asof').textContent = 'Values as of ' + new Date(data.now_ms).toLocaleTimeString() + '.';
   if (shownRoom) showRoom(shownRoom);
 }
@@ -361,8 +363,89 @@ $('t-labels').addEventListener('change', e => {
     d.classList.toggle('compact', labelMode === 'compact');
   }
 });
+// Tour (REQ-UI-010): visit the rooms one after another. Rooms with a
+// warning come up every other step, a new warning is shown at once, and
+// warned rooms pulse red. Touching the view pauses the tour for a minute.
+const tourRooms = M.rooms.filter(r => r.haus_rooms.length && !r.deck)
+  .sort((a, b) => levelById[b.level].z - levelById[a.level].z || a.name.localeCompare(b.name));
+const warnedRooms = () => tourRooms.filter(r => data.rooms[r.id]?.warnings.length);
+const levelBox = id => lv.querySelector(`input[data-l="${CSS.escape(id)}"]`);
+const tourBtn = $('tour'), every = $('every'), box = el.parentElement;
+let touring = false, tourTimer = null, step = 0, iAll = 0, iWarn = 0, pausedUntil = 0, fly = null, current = null;
+function centreOf(r) { const v = P(r.label || mid(r.poly)); return new THREE.Vector3(v.x, groups[r.level].position.y + 0.4, v.y); }
+function focusOn(r) {
+  // Floors above the room are hidden, so it is seen from above.
+  const z = levelById[r.level].z;
+  for (const l of M.levels) groups[l.id].visible = l.z <= z && levelBox(l.id).checked;
+  setRoof(false);
+  const t = centreOf(r), [x0, x1, y0, y1] = bbox(r.poly);
+  const dir = camera.position.clone().sub(controls.target);
+  dir.y = Math.max(dir.y, 0.8 * Math.hypot(dir.x, dir.z)); dir.normalize();
+  fly = { t, p: t.clone().add(dir.multiplyScalar(Math.max(2.6 * Math.max(x1 - x0, y1 - y0), 14))) };
+  current = r; showRoom(r); renderAlerts();
+  for (const [id, d] of Object.entries(roomLabel)) d.classList.toggle('current', id === r.id);
+}
+function next() {
+  if (Date.now() < pausedUntil || !tourRooms.length) return;
+  const w = warnedRooms();
+  focusOn(w.length && step++ % 2 === 0 ? w[iWarn++ % w.length] : tourRooms[iAll++ % tourRooms.length]);
+}
+function restartTimer() { clearInterval(tourTimer); if (touring) tourTimer = setInterval(next, every.value * 1000); }
+function setTour(on) {
+  touring = on; tourBtn.textContent = on ? '■ Stop tour' : '▶ Tour'; tourBtn.setAttribute('aria-pressed', on);
+  box.classList.toggle('touring', on);
+  if (on) { pausedUntil = 0; next(); }
+  else {
+    fly = null; current = null;
+    for (const l of M.levels) groups[l.id].visible = levelBox(l.id).checked;
+    for (const d of Object.values(roomLabel)) d.classList.remove('current');
+    renderAlerts();
+  }
+  restartTimer();
+}
+tourBtn.addEventListener('click', () => setTour(!touring));
+every.addEventListener('change', restartTimer);
+const pause = () => { if (touring) { pausedUntil = Date.now() + 60_000; fly = null; } };
+renderer.domElement.addEventListener('pointerdown', pause);
+renderer.domElement.addEventListener('wheel', pause, { passive: true });
+// The warned rooms, always on top of the view; a click flies there.
+function renderAlerts() {
+  const a = $('alerts'); a.textContent = '';
+  for (const r of warnedRooms()) {
+    const b = document.createElement('button'); b.type = 'button';
+    b.textContent = '⚠ ' + (r.short || r.name); b.title = data.rooms[r.id].warnings.map(w => w.message).join('\n');
+    b.classList.toggle('on', current === r);
+    b.addEventListener('click', () => { if (touring) pausedUntil = Date.now() + 60_000; focusOn(r); });
+    a.appendChild(b);
+  }
+}
+// Full screen: the button or the f key (not offered where unsupported).
+const fsBtn = $('fullscreen');
+fsBtn.hidden = !document.fullscreenEnabled;
+const toggleFs = () => (document.fullscreenElement ? document.exitFullscreen() : box.requestFullscreen()).catch(() => {});
+fsBtn.addEventListener('click', toggleFs);
+document.addEventListener('keydown', e => { if (e.key === 'f' && !e.target.closest('input, select, textarea')) toggleFs(); });
+document.addEventListener('fullscreenchange', () => { fsBtn.textContent = document.fullscreenElement ? 'Exit full screen' : 'Full screen'; });
 applyValues();
-setInterval(async () => { try { data = { ...data, ...(await load()) }; applyValues(); } catch (e) { $('asof').textContent = 'Update failed: ' + e.message; } }, 60_000);
+// ?tour or ?tour=<seconds> starts the tour (a wall screen).
+{
+  const q = new URLSearchParams(location.search);
+  if (q.has('tour')) {
+    const sec = parseInt(q.get('tour'), 10);
+    if ([...every.options].some(o => +o.value === sec)) every.value = String(sec);
+    // A wall screen: the panel collapsed, the view free.
+    if ($('pbody').style.display !== 'none') $('collapse').click();
+    setTour(true);
+  }
+}
+setInterval(async () => {
+  try {
+    const before = new Set(warnedRooms().map(r => r.id));
+    data = { ...data, ...(await load()) }; applyValues();
+    const fresh = warnedRooms().find(r => !before.has(r.id));
+    if (fresh && touring) { focusOn(fresh); restartTimer(); }
+  } catch (e) { $('asof').textContent = 'Update failed: ' + e.message; }
+}, 60_000);
 let frameNo = 0;
 function declutter() {
   const placed = [];
@@ -376,4 +459,17 @@ function declutter() {
     else placed.push(r);
   }
 }
-(function loop() { controls.update(); for (const o of css) o.visible = shown(o); renderer.render(scene, camera); labels.render(scene, camera); if (frameNo++ % 6 === 0) declutter(); requestAnimationFrame(loop); })();
+const pulseOff = new THREE.Color(0x000000);
+(function loop(now) {
+  if (fly) {
+    controls.target.lerp(fly.t, 0.08); camera.position.lerp(fly.p, 0.08);
+    if (camera.position.distanceTo(fly.p) < 0.05) fly = null;
+  }
+  const k = 0.35 + 0.35 * Math.sin((now || 0) / 300);
+  for (const r of tourRooms) {
+    const m = roomMesh[r.id]; if (!m) continue;
+    // A warned room glows in its own colour (a red tint would read as
+    // another temperature); its label and the alert strip are red.
+    if (data.rooms[r.id]?.warnings.length) m.material.emissive.copy(m.material.color).multiplyScalar(k); else m.material.emissive.copy(pulseOff);
+  }
+  controls.update(); for (const o of css) o.visible = shown(o); renderer.render(scene, camera); labels.render(scene, camera); if (frameNo++ % 6 === 0) declutter(); requestAnimationFrame(loop); })();
