@@ -39,6 +39,7 @@ tokio-stream = { version = "0.1", features = ["sync"] }
 bytes = "1.9"
 
 [dev-dependencies]
+sha2 = "0.10"
 rsa = "0.9"
 rand = "0.8"
 base64 = "0.22"

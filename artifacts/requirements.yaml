@@ -302,10 +302,16 @@ artifacts:
     release: v0.4.0
     description: >
       Pages are rendered by the server; the only browser script is vendored htmx
-      (and SSE). The release builds with cargo alone.
+      (and SSE), except on the house page (REQ-UI-006), which also loads
+      vendored three.js 0.160.0 and its own viewer script, each pinned by
+      checksum and served by haus; nothing is fetched from elsewhere. The
+      release builds with cargo alone.
     fields:
       priority: must
       category: constraint
+    links:
+      - type: traces-to
+        target: REQ-UI-006
 
   - id: REQ-UI-008
     type: requirement
@@ -489,7 +495,7 @@ artifacts:
   - id: REQ-UI-006
     type: requirement
     title: A 3D view of the house with sensors in their rooms
-    status: approved
+    status: implemented
     release: v0.5.0
     description: >
       A page shows the building level by level (levels can be shown alone or

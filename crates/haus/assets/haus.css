@@ -61,3 +61,28 @@ nav.apps { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-left: auto; fon
 nav.apps a { color: var(--dim, inherit); text-decoration: none; }
 nav.apps a:hover { text-decoration: underline; }
 nav.apps a[aria-current="page"] { color: inherit; font-weight: 600; }
+/* The 3D house page (REQ-UI-006). */
+.house3d { position: relative; height: calc(100vh - 10rem); min-height: 420px; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.house3d #view { position: absolute; inset: 0; z-index: 0; isolation: isolate; }
+.house3d .panel { position: absolute; top: 10px; left: 10px; width: min(300px, calc(100% - 20px)); max-height: calc(100% - 20px); overflow: auto;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; z-index: 2; font-size: .85rem; }
+.house3d .panel-head { display: flex; justify-content: space-between; align-items: center; }
+.house3d h2 { font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; color: var(--dim); margin: 10px 0 2px; }
+.house3d .dim { color: var(--dim); font-size: .78rem; margin-top: 6px; }
+.house3d label { display: flex; align-items: center; gap: 6px; margin: 3px 0; }
+.house3d .row { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 6px; }
+.house3d input[type=range] { width: 100%; }
+.house3d .scale { height: 10px; border-radius: 5px; margin: 6px 0 2px; background: linear-gradient(90deg, #2563eb, #16a34a 40%, #eab308 70%, #dc2626); }
+.house3d .ticks { display: flex; justify-content: space-between; font-size: .7rem; color: var(--dim); }
+.house3d button, .house3d select { font: inherit; font-size: .78rem; padding: 2px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); cursor: pointer; }
+.house3d #info { position: absolute; right: 10px; bottom: 10px; width: min(300px, calc(100% - 20px)); max-height: 60%; overflow: auto; background: var(--surface);
+  border: 1px solid var(--border); border-radius: 10px; padding: 8px 12px; z-index: 2; display: none; font-size: .85rem; }
+.house3d #info table { width: 100%; border-collapse: collapse; }
+.house3d #info td { padding: 1px 0; border: 0; } .house3d #info td.v { text-align: right; font-family: var(--mono); white-space: nowrap; padding-left: 8px; }
+.house3d #info .warn { color: var(--warn); margin: 4px 0; }
+.house3d #info .stale { color: var(--stale); }
+.house3d .lbl { font: 600 11px var(--sans); color: #1c1917; background: rgba(255, 253, 249, .85); border-radius: 4px; padding: 1px 5px; white-space: nowrap; pointer-events: none; }
+.house3d .lbl.compact { font-size: 10px; padding: 0 4px; }
+.house3d .lbl span { font-weight: 400; color: #57534e; }
+.house3d .tag { font: 500 10px var(--sans); color: #57534e; background: rgba(255, 253, 249, .6); border-radius: 3px; padding: 0 3px; pointer-events: none; }
+.house3d .north { font: 700 13px var(--sans); color: #c2410c; pointer-events: none; }
