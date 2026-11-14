@@ -254,4 +254,5 @@ roots in `varve-realms.toml`); `varve install` fetches and verifies it. CI runs
 
 ## License
 
-MIT (see `license` in `Cargo.toml`).
+Apache License 2.0, see [LICENSE](LICENSE).
+`crates/haus/assets/idle.js` is taken from [pulseengine/warte](https://github.com/pulseengine/warte), also Apache-2.0.
