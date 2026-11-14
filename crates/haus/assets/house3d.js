@@ -406,10 +406,34 @@ function focusOn(r) {
   current = r; showRoom(r); renderAlerts();
   for (const [id, d] of Object.entries(roomLabel)) d.classList.toggle('current', id === r.id);
 }
+// Every fourth step looks at the whole house from one of the model's
+// viewpoints (Tölleturm, garden, above, ...), a little different each time:
+// the bearing within ±15°, distance and height within ±10 %.
+const overviews = M.views.length ? M.views
+  : [{ name: 'House', from_deg: 200, distance_m: span * 1.6, height_m: span * 1.1, shell: false }];
+let iView = 0;
+function overview() {
+  const b = overviews[iView++ % overviews.length], j = f => 1 + (Math.random() - 0.5) * f;
+  for (const l of M.levels) groups[l.id].visible = levelBox(l.id).checked;
+  if (b.shell) { ex.value = 0; place(); }
+  setRoof(!!b.shell);
+  let p;
+  if (b.distance_m > 0) {
+    const [dx, dy] = bearing(b.from_deg + (Math.random() - 0.5) * 30), d = b.distance_m * j(0.2);
+    p = new THREE.Vector3(dx * d, b.height_m * j(0.2), -dy * d);
+  } else p = new THREE.Vector3(0.01, b.height_m * j(0.2), 0.01);
+  fly = { t: target.clone(), p };
+  current = null; shownRoom = null; info.style.display = 'none';
+  for (const d of Object.values(roomLabel)) d.classList.remove('current');
+  renderAlerts();
+}
 function next() {
   if (Date.now() < pausedUntil || !tourRooms.length) return;
+  const k = step++;
+  if (k % 4 === 3) return overview();
+  // Rooms with an alarm come up every other room step.
   const w = warnedRooms();
-  focusOn(w.length && step++ % 2 === 0 ? w[iWarn++ % w.length] : tourRooms[iAll++ % tourRooms.length]);
+  focusOn(w.length && k % 2 === 0 ? w[iWarn++ % w.length] : tourRooms[iAll++ % tourRooms.length]);
 }
 function restartTimer() { clearInterval(tourTimer); if (touring) tourTimer = setInterval(next, every.value * 1000); }
 function setTour(on) {
@@ -624,4 +648,7 @@ let lastFrame = 0;
     ? { x: 0, y: Math.min(info.offsetHeight + 20, H * 0.6) }
     : { x: Math.min(info.offsetWidth + 20, W * 0.5), y: 0 };
   if (Math.abs(c.x - cover.x) > 4 || Math.abs(c.y - cover.y) > 4) { cover = c; fitCamera(); }
+  // While touring, the camera drifts slowly around what it looks at.
+  controls.autoRotate = touring && !fly && Date.now() >= pausedUntil;
+  controls.autoRotateSpeed = 0.35;
   controls.update(); for (const o of css) o.visible = shown(o); renderer.render(scene, camera); labels.render(scene, camera); if (frameNo++ % 6 === 0) declutter(); requestAnimationFrame(loop); })();
