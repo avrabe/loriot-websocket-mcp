@@ -4,16 +4,19 @@
 //! haus receives every change from the Miniserver; Stats4Lox samples on an
 //! interval. So the comparison is by value, not by count: for each Stats4Lox
 //! sample since `since`, the value haus had standing at that time (the last
-//! point at or before it, within the source's hold) must equal the sample,
-//! allowing a clock skew between the logger's poll and the event.
+//! live point at or before it, however old) must equal the sample, allowing
+//! a clock skew between the logger's poll and the event. A Loxone value
+//! stands until the next change: a sensor that sends nothing for days still
+//! has its value (the charts' 24 h hold is for drawing gaps, not for this).
+//! If haus missed a change while disconnected, the sample disagrees, which
+//! is the failure the comparison exists to show.
 //!
 //! Run it *before* importing the logger's final delta: once the delta is
 //! imported, the store holds the logger's own points and every sample would
 //! trivially match.
 
-use crate::chart::hold_ms;
 use crate::import::{read_stats4lox, ImportError, ImportReport};
-use crate::store::{Source, Store};
+use crate::store::Store;
 use serde::Serialize;
 
 #[derive(Clone, Copy, Debug)]
@@ -68,13 +71,10 @@ impl CompareReport {
 }
 
 /// The value standing at `t` in `points` (sorted): the last one at or before
-/// `t`, if it is at most `hold` old.
-fn standing(points: &[(i64, f64)], t: i64, hold: i64) -> Option<f64> {
+/// `t`.
+fn standing(points: &[(i64, f64)], t: i64) -> Option<f64> {
     let i = points.partition_point(|(ts, _)| *ts <= t);
-    (i > 0)
-        .then(|| points[i - 1])
-        .filter(|(ts, _)| t - ts <= hold)
-        .map(|(_, v)| v)
+    (i > 0).then(|| points[i - 1].1)
 }
 
 /// Compare a Stats4Lox export with the store.
@@ -85,7 +85,6 @@ pub fn compare_stats4lox(
 ) -> Result<CompareReport, ImportError> {
     let mut report = CompareReport::default();
     let mut parse = ImportReport::default();
-    let hold = hold_ms(Source::Loxone);
     read_stats4lox(dir, &mut parse, |measurement, series, _| {
         for (key, ps) in series {
             let samples: Vec<(i64, f64)> = ps
@@ -117,15 +116,13 @@ pub fn compare_stats4lox(
                 report.series.push(c);
                 continue;
             };
-            let first = samples[0].0;
             let last = samples[samples.len() - 1].0;
             // Only what haus received live: imported points would match themselves.
-            let have = store.range_live(id, first - opts.skew_ms - hold, last + opts.skew_ms)?;
+            let have = store.range_live(id, i64::MIN, last + opts.skew_ms)?;
             for (t, v) in samples {
                 // The value at t - skew, and every value haus took up to t + skew.
-                let mut candidates: Vec<f64> = standing(&have, t - opts.skew_ms, hold)
-                    .into_iter()
-                    .collect();
+                let mut candidates: Vec<f64> =
+                    standing(&have, t - opts.skew_ms).into_iter().collect();
                 let lo = have.partition_point(|(ts, _)| *ts <= t - opts.skew_ms);
                 let hi = have.partition_point(|(ts, _)| *ts <= t + opts.skew_ms);
                 candidates.extend(have[lo..hi].iter().map(|(_, x)| *x));
@@ -158,7 +155,7 @@ pub fn compare_stats4lox(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::store::{Point, Quantity, SeriesKey, SeriesMeta};
+    use crate::store::{Point, Quantity, SeriesKey, SeriesMeta, Source};
     use serde_json::json;
     use std::io::Write;
 
@@ -302,6 +299,27 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
+    // A sensor that has not changed for days (Loxone sends nothing) still
+    // has its value; the first live comparison stopped counting it after
+    // 24 h, as if haus had lost it.
+    // rivet: verifies REQ-RETIRE-001
+    #[test]
+    fn an_unchanged_value_still_stands_days_later() {
+        let d = tmp();
+        let day = 86_400_000;
+        let store = store_with(&d, &[(T0 - 3 * day, 27.7)]);
+        let samples: Vec<(i64, f64)> = (0..4).map(|i| (T0 + i * day, 27.7)).collect();
+        export(&d, "u", &samples);
+        let r = compare_stats4lox(&store, &d, opts()).unwrap();
+        assert!(r.ok(), "{r:?}");
+        assert_eq!(r.series[0].matched, 4);
+        // A change haus missed shows as a disagreement, not as agreement.
+        export(&d, "u", &[(T0 + 4 * day, 30.0)]);
+        let r = compare_stats4lox(&store, &d, opts()).unwrap();
+        assert_eq!(r.series[0].mismatched, 1);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
     #[test]
     fn a_disagreement_or_a_missing_value_fails() {
         // Different value.
@@ -314,9 +332,9 @@ mod tests {
         assert!(r.series[0].first_problem.as_deref().unwrap().contains("22"));
         let _ = std::fs::remove_dir_all(&d);
 
-        // haus had nothing at that time (older than the hold).
+        // haus had nothing yet at that time (its first value came later).
         let d = tmp();
-        let store = store_with(&d, &[(T0 - 2 * 86_400_000, 20.0)]);
+        let store = store_with(&d, &[(T0 + 30 * MIN, 20.0)]);
         export(&d, "u", &[(T0, 20.0)]);
         let r = compare_stats4lox(&store, &d, opts()).unwrap();
         assert!(!r.ok());
