@@ -91,7 +91,7 @@ pub fn body() -> String {
 <p class="row"><button id="tour" type="button" aria-pressed="false" title="Visit the rooms one after another; rooms with a warning come up every other step">▶ Tour</button> <label>every <select id="every"><option value="5">5 s</option><option value="10" selected>10 s</option><option value="20">20 s</option><option value="30">30 s</option></select></label></p>
 <label for="explode">Explode floors</label><input id="explode" type="range" min="0" max="8" step="0.1" value="2.5">
 <div class="scale"></div><div class="ticks"><span>16 °C</span><span>20</span><span>23</span><span>26 °C</span></div>
-<p class="dim">Colour: the room's air temperature (median of its air sensors; floor and radiator probes, stuck and silent sensors left out). Grey: no value. Red pulse: the room has a warning. Click a room for its sensors. On a wall screen open <code>house?tour=10</code>; touching the view pauses the tour for a minute.</p>
+<p class="dim">Colour: the room's air temperature (median of its air sensors; floor and radiator probes, stuck and silent sensors left out; a room with no air sensor shows its floor probe, marked "floor"). Grey: no value. Red pulse: the room has a warning. Click a room for its sensors. On a wall screen open <code>house?tour=10</code>; touching the view pauses the tour for a minute.</p>
 <p class="dim" id="wx"></p>
 <p class="dim" id="asof"></p>
 </div></div>
@@ -149,6 +149,8 @@ pub struct WarnOut {
 #[derive(Serialize, Debug, PartialEq)]
 pub struct RoomOut {
     pub air_c: Option<f64>,
+    /// air_c comes from the floor probe: the room has no air sensor.
+    pub floor: bool,
     pub rh: Option<f64>,
     pub series: Vec<SeriesOut>,
     pub warnings: Vec<WarnOut>,
@@ -229,6 +231,7 @@ pub fn rooms(
             r.id.clone(),
             RoomOut {
                 air_c: c.air_c,
+                floor: c.floor,
                 rh: c.rh,
                 series,
                 warnings: warnings

@@ -311,13 +311,13 @@ function applyValues() {
     if (mesh) mesh.material.color.copy(tempColor(v ? v.air_c : null));
     const d = roomLabel[r.id]; if (!d) continue;
     const parts = [];
-    if (v && v.air_c != null) parts.push(fmt(v.air_c, 1) + ' °C');
+    if (v && v.air_c != null) parts.push(fmt(v.air_c, 1) + ' °C' + (v.floor ? ' (floor)' : ''));
     if (v && v.rh != null) parts.push(fmt(v.rh, 0) + ' %');
     // An alarm about the room is red with ⚠; a sensor to check is a calm note.
     const alarm = v && v.warnings.some(w => !w.check), check = !alarm && v && v.warnings.length;
     const warned = alarm ? ' ⚠' : check ? ' ' + CHECK_ICON[v.warnings[0].kind] : '';
     d.dataset.full = esc(r.name) + warned + (parts.length ? ' <span>' + parts.join(' · ') + '</span>' : '');
-    d.dataset.compact = esc(r.short || r.name) + warned + (v && v.air_c != null ? ' <span>' + fmt(v.air_c, 0) + '°</span>' : '');
+    d.dataset.compact = esc(r.short || r.name) + warned + (v && v.air_c != null ? ' <span>' + fmt(v.air_c, 0) + '°' + (v.floor ? ' floor' : '') + '</span>' : '');
     d.innerHTML = labelMode === 'full' ? d.dataset.full : d.dataset.compact;
     d.classList.toggle('warned', !!alarm); d.classList.toggle('checked', !!check);
   }
@@ -333,7 +333,7 @@ function showRoom(r) {
   if (v) {
     for (const w of v.warnings.filter(w => !w.check)) h += `<p class="warn">${esc(w.message)}</p>`;
     for (const w of v.warnings.filter(w => w.check)) h += `<p class="check">${esc(CHECK_ICON[w.kind] + ' ' + w.short)}</p>`;
-    const sum = [v.air_c != null ? fmt(v.air_c, 1) + ' °C' : null, v.rh != null ? fmt(v.rh, 0) + ' %' : null].filter(Boolean);
+    const sum = [v.air_c != null ? fmt(v.air_c, 1) + ' °C' + (v.floor ? ' (floor probe)' : '') : null, v.rh != null ? fmt(v.rh, 0) + ' %' : null].filter(Boolean);
     if (sum.length) h += `<p class="sum">${esc(sum.join(' · '))}</p>`;
     // The sensor list folds away during the tour and on small screens, so
     // the box does not cover the house; a tap opens it.
