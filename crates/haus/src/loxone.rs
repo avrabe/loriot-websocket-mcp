@@ -715,7 +715,7 @@ async fn session(state: &AppState, cfg: &LoxoneConfig) -> Result<(), BoxError> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     //! The client against an in-process fake Miniserver that implements the
     //! server side of the V17.0 protocol: RSA key exchange, AES `enc`
     //! commands, getkey2/getjwt/authwithtoken hashing, structure file, value
@@ -1140,7 +1140,7 @@ mod tests {
 
     /// Collects formatted log output.
     #[derive(Clone, Default)]
-    struct LogBuf(Arc<Mutex<Vec<u8>>>);
+    pub(crate) struct LogBuf(pub(crate) Arc<Mutex<Vec<u8>>>);
     impl std::io::Write for LogBuf {
         fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
             self.0.lock().unwrap().extend_from_slice(b);
@@ -1160,7 +1160,7 @@ mod tests {
     /// Every log line of this test binary, from a process-wide subscriber.
     /// A thread-local one races with parallel tests: their threads cache
     /// callsites as disabled and the capture comes back empty.
-    fn global_logs() -> LogBuf {
+    pub(crate) fn global_logs() -> LogBuf {
         static LOGS: std::sync::OnceLock<LogBuf> = std::sync::OnceLock::new();
         LOGS.get_or_init(|| {
             let buf = LogBuf::default();

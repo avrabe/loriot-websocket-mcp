@@ -19,10 +19,15 @@ env:
   # varve itself; the tools (rivet) come from the layer varve.toml pins.
   VARVE_VERSION: v0.47.0
 
+# Self-hosted runners (smithy's) serve pushes and pull requests from this
+# repository only; a pull request from a fork always runs on GitHub's
+# runners (fail closed: anything not provably this repository is hosted).
+# No job here may move into a pull_request_target workflow. release.yml
+# stays on GitHub's runners for its provenance.
 jobs:
   check:
     name: fmt, clippy, test
-    runs-on: ubuntu-24.04
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","rust-cpu"]') || 'ubuntu-24.04' }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -62,7 +67,7 @@ jobs:
   # rivet: verifies DD-001
   rivet:
     name: rivet validate
-    runs-on: ubuntu-24.04
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","light"]') || 'ubuntu-24.04' }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
