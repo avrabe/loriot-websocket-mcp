@@ -533,6 +533,9 @@ mod tests {
             .with_env_filter(tracing_subscriber::EnvFilter::new(DEFAULT_LOG_FILTER))
             .finish();
         let _guard = tracing::subscriber::set_default(subscriber);
+        // Other tests install a global subscriber; callsites they registered
+        // first keep that interest cached and would skip this one.
+        tracing::callsite::rebuild_interest_cache();
 
         let app = with_http_layers(
             Router::new().route("/api/ping", get(|| async { "pong" })),
