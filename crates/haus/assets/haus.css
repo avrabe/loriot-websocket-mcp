@@ -55,6 +55,7 @@ tr.stale td { color: var(--stale); }
 @media (max-width: 600px) { .top { gap: .8rem; } table { font-size: .85rem; } }
 .room.warned { border-color: var(--warn); }
 .warn { color: var(--warn); font-size: .85rem; list-style: none; padding: .15rem 0; }
+.warn.check { color: var(--dim); }
 .warnings { list-style: none; margin-bottom: 1rem; }
 /* nav v1: home link and app switcher (HAUS_NAV) */
 nav.apps { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-left: auto; font-size: 13px; }
@@ -79,7 +80,8 @@ nav.apps a[aria-current="page"] { color: inherit; font-weight: 600; }
   border: 1px solid var(--border); border-radius: 10px; padding: 8px 12px; z-index: 2; display: none; font-size: .85rem; }
 .house3d #info table { width: 100%; border-collapse: collapse; }
 .house3d #info td { padding: 1px 0; border: 0; } .house3d #info td.v { text-align: right; font-family: var(--mono); white-space: nowrap; padding-left: 8px; }
-.house3d #info .warn { color: var(--warn); margin: 4px 0; }
+.house3d #info .warn { color: #b91c1c; margin: 4px 0; font-weight: 600; }
+@media (prefers-color-scheme: dark) { .house3d #info .warn { color: #f87171; } }
 .house3d #info .stale { color: var(--stale); }
 .house3d .lbl { font: 600 11px var(--sans); color: #1c1917; background: rgba(255, 253, 249, .85); border-radius: 4px; padding: 1px 5px; white-space: nowrap; pointer-events: none; }
 .house3d .lbl.compact { font-size: 10px; padding: 0 4px; }
@@ -87,6 +89,11 @@ nav.apps a[aria-current="page"] { color: inherit; font-weight: 600; }
 .house3d .tag { font: 500 10px var(--sans); color: #57534e; background: rgba(255, 253, 249, .6); border-radius: 3px; padding: 0 3px; pointer-events: none; }
 .house3d .north { font: 700 13px var(--sans); color: #c2410c; pointer-events: none; }
 .house3d:fullscreen { height: 100vh; border: 0; border-radius: 0; background: var(--bg); }
+.house3d.max { position: fixed; inset: 0; z-index: 1000; height: auto; min-height: 0; border: 0; border-radius: 0; background: var(--bg); }
+html.house-max, html.house-max body { overflow: hidden; }
+.house3d #alerts button.check { background: var(--surface); color: var(--text); border-color: #b45309; font-weight: 500; }
+.house3d .lbl.checked { box-shadow: inset 0 0 0 1.5px #b45309; }
+.house3d #info .check { color: var(--dim); margin: 4px 0; }
 .house3d #alerts { position: absolute; top: 10px; right: 10px; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; max-width: calc(100% - 340px); }
 .house3d #alerts:empty { display: none; }
 .house3d #alerts button { background: #b91c1c; color: #fff; border-color: #b91c1c; font-weight: 600; }

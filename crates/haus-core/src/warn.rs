@@ -114,6 +114,17 @@ pub enum Kind {
     HeatingAnomaly,
 }
 
+impl Kind {
+    /// A sensor or source to look at (stuck, silent, battery, connection),
+    /// as opposed to an alarm about the room itself (too cold, mould, ...).
+    pub fn is_check(self) -> bool {
+        matches!(
+            self,
+            Kind::SensorSilent | Kind::SensorStuck | Kind::SourceDown | Kind::BatteryLow
+        )
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Warning {
     pub kind: Kind,

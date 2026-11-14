@@ -674,11 +674,36 @@ artifacts:
       once. Warned rooms glow in their own colour and are listed in a strip
       on top of the view (a click flies there). house?tour=<seconds> starts
       the tour with the panel collapsed, for a wall screen; touching the
-      view pauses it for a minute. The view can go full screen (button or
-      f) where the browser supports it.
+      view pauses it for a minute. The view goes full screen (button in the
+      panel head, or f); where the browser refuses, it fills the browser
+      window instead, and the button or Esc brings the page back. Only
+      alarms about a room (REQ-UI-011) come first in the tour and pulse.
     fields:
       priority: should
       category: functional
     links:
       - type: traces-to
         target: REQ-UI-006
+      - type: traces-to
+        target: REQ-UI-011
+
+  - id: REQ-UI-011
+    type: requirement
+    title: A sensor to check is a short note, not an alarm
+    status: implemented
+    release: v0.5.0
+    description: >
+      Warnings are of two sorts. An alarm is about the room (too cold, too
+      warm, frost, mould risk, heating not warming); a check is about a
+      sensor or source (stuck, silent, battery low, source down). On the
+      room cards and in the house view a check reads in a few words, naming
+      the sensor by its readable label and since when ("Check Fenster: no
+      change for 3 d"), in a calm style; it does not mark the room card,
+      does not come first in the tour and does not pulse. The status page
+      and /api/warnings keep the full message.
+    fields:
+      priority: should
+      category: functional
+    links:
+      - type: traces-to
+        target: REQ-WARN-001

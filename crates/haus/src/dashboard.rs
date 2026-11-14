@@ -283,12 +283,52 @@ fn warn_icon(k: Kind) -> &'static str {
     }
 }
 
-fn warn_item(w: &Warning) -> String {
+fn warn_item(w: &Warning, text: &str) -> String {
     format!(
-        r#"<li class="warn">{} {}</li>"#,
+        r#"<li class="warn{}">{} {}</li>"#,
+        if w.kind.is_check() { " check" } else { "" },
         warn_icon(w.kind),
-        esc(&w.message)
+        esc(text)
     )
+}
+
+/// A duration in words: "40 min", "5 h", "3 d".
+fn span(ms: i64) -> String {
+    let m = ms.max(0) / 60_000;
+    match m {
+        0..=119 => format!("{m} min"),
+        120..=2879 => format!("{} h", m / 60),
+        _ => format!("{} d", m / 1440),
+    }
+}
+
+/// A warning in a few words, for the room cards and the house view
+/// (REQ-UI-011): an alarm keeps its message; a sensor to check says which
+/// one (its readable label) and since when. The status page keeps the full
+/// message.
+pub(crate) fn short_text<'a>(
+    w: &Warning,
+    meta: impl Fn(u32) -> Option<&'a SeriesMeta>,
+    now_ms: i64,
+) -> String {
+    if !w.kind.is_check() {
+        return w.message.clone();
+    }
+    let who = w
+        .series
+        .first()
+        .and_then(|id| meta(*id))
+        .map(|m| sensor_label(m, room_of(m)).unwrap_or_else(|| m.name.clone()));
+    let dur = w
+        .since_ms
+        .map(|t| format!(" for {}", span(now_ms - t)))
+        .unwrap_or_default();
+    match (w.kind, who) {
+        (Kind::SensorStuck, Some(n)) => format!("Check {n}: no change{dur}"),
+        (Kind::SensorSilent, Some(n)) => format!("Check {n}: no data{dur}"),
+        (Kind::BatteryLow, Some(n)) => format!("Check {n}: battery low"),
+        _ => w.message.clone(),
+    }
 }
 
 pub fn render_overview(
@@ -312,6 +352,9 @@ pub fn render_overview(
         r#"<div id="overview" hx-get="partials/overview" hx-trigger="every 30s" hx-swap="outerHTML">"#,
     );
     s += &source_chips(live);
+    let metas: std::collections::HashMap<u32, &SeriesMeta> =
+        views.iter().map(|v| (v.id, &v.meta)).collect();
+    let meta_of = |id: u32| metas.get(&id).copied();
     let room_names: std::collections::HashSet<&str> = rooms.keys().map(String::as_str).collect();
     let elsewhere: Vec<&Warning> = warnings
         .iter()
@@ -336,13 +379,18 @@ pub fn render_overview(
     for (room, mut vs) in rooms {
         vs.sort_by_key(|v| (rank(v.meta.quantity), v.meta.name.clone(), v.id));
         let mine: Vec<&Warning> = warnings.iter().filter(|w| w.room == room).collect();
+        // Only an alarm marks the card; a sensor to check is a note on it.
         s += &format!(
             r#"<article class="room{}"><h2>{}</h2><ul>"#,
-            if mine.is_empty() { "" } else { " warned" },
+            if mine.iter().any(|w| !w.kind.is_check()) {
+                " warned"
+            } else {
+                ""
+            },
             esc(&room)
         );
         for w in mine {
-            s += &warn_item(w);
+            s += &warn_item(w, &short_text(w, meta_of, now_ms));
         }
         for v in vs {
             let stale = is_stale(v, live, now_ms);
@@ -822,6 +870,81 @@ mod tests {
                 0.0,
             ),
         ]
+    }
+
+    // rivet: verifies REQ-UI-011
+    #[test]
+    fn a_sensor_to_check_reads_short_and_an_alarm_keeps_its_message() {
+        let lox = view(
+            950,
+            Source::Loxone,
+            Quantity::Temperature,
+            "Temperatur Fenster",
+            Some("Diele"),
+            Some(MIN),
+            18.1,
+        );
+        let lora = view(
+            951,
+            Source::Loriot,
+            Quantity::Temperature,
+            "Keller Sensor",
+            None,
+            Some(MIN),
+            9.0,
+        );
+        let views = [lox.clone(), lora.clone()];
+        let meta = |id: u32| views.iter().find(|v| v.id == id).map(|v| &v.meta);
+        let w = |kind, series: Vec<u32>, since: Option<i64>| Warning {
+            kind,
+            room: "Diele".into(),
+            series,
+            message: "the long message".into(),
+            since_ms: since,
+        };
+        let stuck = w(Kind::SensorStuck, vec![950], Some(NOW - 3 * 86_400_000));
+        assert_eq!(
+            short_text(&stuck, meta, NOW),
+            "Check Fenster: no change for 3 d"
+        );
+        let silent = w(Kind::SensorSilent, vec![951], Some(NOW - 181 * MIN));
+        assert_eq!(
+            short_text(&silent, meta, NOW),
+            "Check Keller Sensor: no data for 3 h"
+        );
+        let battery = w(Kind::BatteryLow, vec![951], Some(NOW));
+        assert_eq!(
+            short_text(&battery, meta, NOW),
+            "Check Keller Sensor: battery low"
+        );
+        // An alarm, or a series not found, keeps the full message.
+        assert_eq!(
+            short_text(&w(Kind::TooCold, vec![950], None), meta, NOW),
+            "the long message"
+        );
+        assert_eq!(
+            short_text(&w(Kind::SensorStuck, vec![9], None), meta, NOW),
+            "the long message"
+        );
+        // A check is a note on the room card; only an alarm marks the card.
+        let live = Live {
+            loriot: true,
+            loxone: Some(true),
+        };
+        let html = render_overview(
+            std::slice::from_ref(&lox),
+            live,
+            NOW,
+            std::slice::from_ref(&stuck),
+        );
+        assert!(
+            html.contains("Check Fenster: no change for 3 d")
+                && html.contains(r#"class="warn check""#),
+            "{html}"
+        );
+        assert!(!html.contains(r#"class="room warned""#), "{html}");
+        let html = render_overview(&[lox], live, NOW, &[w(Kind::TooCold, vec![950], None)]);
+        assert!(html.contains(r#"class="room warned""#));
     }
 
     // rivet: verifies REQ-UI-007

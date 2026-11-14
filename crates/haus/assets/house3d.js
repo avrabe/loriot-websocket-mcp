@@ -8,6 +8,8 @@ import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const dark = matchMedia('(prefers-color-scheme: dark)').matches;
+// The status page's icons for a sensor to check.
+const CHECK_ICON = { sensor_stuck: '⏸', sensor_silent: '📡', battery_low: '🔋', source_down: '📡' };
 
 async function load() {
   const r = await fetch('api/house', { headers: { accept: 'application/json' } });
@@ -310,11 +312,13 @@ function applyValues() {
     const parts = [];
     if (v && v.air_c != null) parts.push(fmt(v.air_c, 1) + ' °C');
     if (v && v.rh != null) parts.push(fmt(v.rh, 0) + ' %');
-    const warned = v && v.warnings.length ? ' ⚠' : '';
+    // An alarm about the room is red with ⚠; a sensor to check is a calm note.
+    const alarm = v && v.warnings.some(w => !w.check), check = !alarm && v && v.warnings.length;
+    const warned = alarm ? ' ⚠' : check ? ' ' + CHECK_ICON[v.warnings[0].kind] : '';
     d.dataset.full = esc(r.name) + warned + (parts.length ? ' <span>' + parts.join(' · ') + '</span>' : '');
     d.dataset.compact = esc(r.short || r.name) + warned + (v && v.air_c != null ? ' <span>' + fmt(v.air_c, 0) + '°</span>' : '');
     d.innerHTML = labelMode === 'full' ? d.dataset.full : d.dataset.compact;
-    d.classList.toggle('warned', !!warned);
+    d.classList.toggle('warned', !!alarm); d.classList.toggle('checked', !!check);
   }
   renderAlerts();
   $('asof').textContent = 'Values as of ' + new Date(data.now_ms).toLocaleTimeString() + '.';
@@ -326,7 +330,8 @@ function showRoom(r) {
   const v = data.rooms[r.id];
   let h = `<b>${esc(r.name)}</b> <span class="dim">${esc(levelById[r.level].name)}</span>`;
   if (v) {
-    for (const w of v.warnings) h += `<p class="warn">${esc(w.message)}</p>`;
+    for (const w of v.warnings.filter(w => !w.check)) h += `<p class="warn">${esc(w.message)}</p>`;
+    for (const w of v.warnings.filter(w => w.check)) h += `<p class="check">${esc(CHECK_ICON[w.kind] + ' ' + w.short)}</p>`;
     const sum = [v.air_c != null ? fmt(v.air_c, 1) + ' °C' : null, v.rh != null ? fmt(v.rh, 0) + ' %' : null].filter(Boolean);
     if (sum.length) h += `<p class="sum">${esc(sum.join(' · '))}</p>`;
     // The sensor list folds away during the tour and on small screens, so
@@ -380,7 +385,10 @@ $('t-labels').addEventListener('change', e => {
 // warned rooms pulse red. Touching the view pauses the tour for a minute.
 const tourRooms = M.rooms.filter(r => r.haus_rooms.length && !r.deck)
   .sort((a, b) => levelById[b.level].z - levelById[a.level].z || a.name.localeCompare(b.name));
-const warnedRooms = () => tourRooms.filter(r => data.rooms[r.id]?.warnings.length);
+// Only alarms about a room come first in the tour and pulse; a sensor to
+// check is listed, calmly, and waits for its turn.
+const warnedRooms = () => tourRooms.filter(r => data.rooms[r.id]?.warnings.some(w => !w.check));
+const checkRooms = () => tourRooms.filter(r => { const w = data.rooms[r.id]?.warnings || []; return w.length && w.every(x => x.check); });
 const levelBox = id => lv.querySelector(`input[data-l="${CSS.escape(id)}"]`);
 const tourBtn = $('tour'), every = $('every'), box = el.parentElement;
 let touring = false, tourTimer = null, step = 0, iAll = 0, iWarn = 0, pausedUntil = 0, fly = null, current = null;
@@ -423,21 +431,43 @@ renderer.domElement.addEventListener('wheel', pause, { passive: true });
 // The warned rooms, always on top of the view; a click flies there.
 function renderAlerts() {
   const a = $('alerts'); a.textContent = '';
-  for (const r of warnedRooms()) {
+  for (const r of [...warnedRooms(), ...checkRooms()]) {
+    const ws = data.rooms[r.id].warnings, alarm = ws.some(w => !w.check);
     const b = document.createElement('button'); b.type = 'button';
-    b.textContent = '⚠ ' + (r.short || r.name); b.title = data.rooms[r.id].warnings.map(w => w.message).join('\n');
+    b.textContent = (alarm ? '⚠ ' : CHECK_ICON[ws[0].kind] + ' ') + (r.short || r.name);
+    b.title = ws.map(w => w.check ? w.short : w.message).join('\n');
+    b.classList.toggle('check', !alarm);
     b.classList.toggle('on', current === r);
     b.addEventListener('click', () => { if (touring) pausedUntil = Date.now() + 60_000; focusOn(r); });
     a.appendChild(b);
   }
 }
-// Full screen: the button or the f key (not offered where unsupported).
+// Full screen: the button or the f key. Where the browser refuses (iPad
+// Safari for anything but video, in-app browsers), the view fills the
+// browser window instead; the button or Esc brings the page back.
 const fsBtn = $('fullscreen');
-fsBtn.hidden = !document.fullscreenEnabled;
-const toggleFs = () => (document.fullscreenElement ? document.exitFullscreen() : box.requestFullscreen()).catch(() => {});
+const fsEl = () => document.fullscreenElement || document.webkitFullscreenElement;
+const fsLabel = () => {
+  const on = !!(fsEl() || box.classList.contains('max'));
+  fsBtn.textContent = on ? '✕' : '⛶'; fsBtn.title = on ? 'Leave full screen (f, Esc)' : 'Full screen (f)';
+  fsBtn.setAttribute('aria-label', on ? 'Leave full screen' : 'Full screen');
+};
+const setMax = on => { box.classList.toggle('max', on); document.documentElement.classList.toggle('house-max', on); fsLabel(); };
+function toggleFs() {
+  if (box.classList.contains('max')) return setMax(false);
+  if (fsEl()) { (document.exitFullscreen || document.webkitExitFullscreen).call(document); return; }
+  const req = box.requestFullscreen || box.webkitRequestFullscreen;
+  let p;
+  try { p = req && req.call(box); } catch (e) { p = null; }
+  Promise.resolve(p).catch(() => {}).then(() => setTimeout(() => { if (!fsEl()) setMax(true); }, 400));
+}
 fsBtn.addEventListener('click', toggleFs);
-document.addEventListener('keydown', e => { if (e.key === 'f' && !e.target.closest('input, select, textarea')) toggleFs(); });
-document.addEventListener('fullscreenchange', () => { fsBtn.textContent = document.fullscreenElement ? 'Exit full screen' : 'Full screen'; });
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && box.classList.contains('max')) setMax(false);
+  else if (e.key === 'f' && !e.target.closest('input, select, textarea')) toggleFs();
+});
+document.addEventListener('fullscreenchange', fsLabel);
+document.addEventListener('webkitfullscreenchange', fsLabel);
 applyValues();
 // ?tour or ?tour=<seconds> starts the tour (a wall screen).
 {
@@ -482,7 +512,7 @@ const pulseOff = new THREE.Color(0x000000);
     const m = roomMesh[r.id]; if (!m) continue;
     // A warned room glows in its own colour (a red tint would read as
     // another temperature); its label and the alert strip are red.
-    if (data.rooms[r.id]?.warnings.length) m.material.emissive.copy(m.material.color).multiplyScalar(k); else m.material.emissive.copy(pulseOff);
+    if (data.rooms[r.id]?.warnings.some(w => !w.check)) m.material.emissive.copy(m.material.color).multiplyScalar(k); else m.material.emissive.copy(pulseOff);
   }
   // While the info box is open, centre the picture in the part of the view
   // it does not cover.

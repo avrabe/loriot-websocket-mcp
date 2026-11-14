@@ -60,7 +60,7 @@ pub fn configured() -> bool {
 pub fn body() -> String {
     format!(
         r#"<div class="house3d"><div id="view"></div>
-<div class="panel"><div class="panel-head"><b>House</b> <button id="collapse" type="button" title="Hide or show the panel">–</button></div><div id="pbody">
+<div class="panel"><div class="panel-head"><b>House</b> <span><button id="fullscreen" type="button" title="Full screen (f)" aria-label="Full screen">⛶</button> <button id="collapse" type="button" title="Hide or show the panel">–</button></span></div><div id="pbody">
 <h2>Floors</h2><div id="levels" class="row"></div>
 <h2>Show</h2><div class="row">
 <label><input type="checkbox" id="t-others" checked> other units</label>
@@ -70,7 +70,7 @@ pub fn body() -> String {
 <label>labels <select id="t-labels"><option value="compact" selected>compact</option><option value="full">full</option><option value="off">off</option></select></label>
 </div>
 <p id="views" class="row"></p>
-<p class="row"><button id="tour" type="button" aria-pressed="false" title="Visit the rooms one after another; rooms with a warning come up every other step">▶ Tour</button> <label>every <select id="every"><option value="5">5 s</option><option value="10" selected>10 s</option><option value="20">20 s</option><option value="30">30 s</option></select></label> <button id="fullscreen" type="button" title="Full screen (f)">Full screen</button></p>
+<p class="row"><button id="tour" type="button" aria-pressed="false" title="Visit the rooms one after another; rooms with a warning come up every other step">▶ Tour</button> <label>every <select id="every"><option value="5">5 s</option><option value="10" selected>10 s</option><option value="20">20 s</option><option value="30">30 s</option></select></label></p>
 <label for="explode">Explode floors</label><input id="explode" type="range" min="0" max="8" step="0.1" value="2.5">
 <div class="scale"></div><div class="ticks"><span>16 °C</span><span>20</span><span>23</span><span>26 °C</span></div>
 <p class="dim">Colour: the room's air temperature (median of its air sensors; floor and radiator probes, stuck and silent sensors left out). Grey: no value. Red pulse: the room has a warning. Click a room for its sensors. On a wall screen open <code>house?tour=10</code>; touching the view pauses the tour for a minute.</p>
@@ -118,6 +118,10 @@ pub struct SeriesOut {
 pub struct WarnOut {
     pub kind: warn::Kind,
     pub message: String,
+    /// In a few words (REQ-UI-011).
+    pub short: String,
+    /// A sensor to check, not an alarm about the room.
+    pub check: bool,
 }
 
 #[derive(Serialize, Debug, PartialEq)]
@@ -211,6 +215,12 @@ pub fn rooms(
                     .map(|w| WarnOut {
                         kind: w.kind,
                         message: w.message.clone(),
+                        short: crate::dashboard::short_text(
+                            w,
+                            |id| data.iter().find(|s| s.id == id).map(|s| &s.meta),
+                            now,
+                        ),
+                        check: w.kind.is_check(),
                     })
                     .collect(),
             },
