@@ -531,3 +531,42 @@ artifacts:
     links:
       - type: satisfies
         target: REQ-UI-007
+
+  - id: DD-019
+    type: design-decision
+    title: The tour runs in the page, warnings interleaved, nothing on the server
+    status: implemented
+    release: v0.5.0
+    description: >
+      The tour, the alert strip and full screen are client-side additions to
+      house3d.js; the server only adds the controls to the page.
+    fields:
+      decision: >
+        The tour visits the rooms with sensors, top floor first. When rooms
+        have warnings, every other step is the next warned room, so a
+        warning is never more than one step away and the other rooms still
+        come up. The minute refresh compares the warned rooms before and
+        after and flies to a new one at once. The camera eases towards the
+        room keeping its viewing direction (at least 40 degrees from
+        above), the floors above the room are hidden and walls and roofs
+        switched off; stopping restores the floor checkboxes. A warned room
+        glows in its own colour (emissive = its colour, pulsing), because a
+        red tint would read as another temperature; the meaning is carried
+        by red labels and the alert strip. Full screen uses the Fullscreen
+        API on the view and is hidden where unsupported (iPhone Safari).
+        ?tour=<s> collapses the panel and starts the tour: a browser in
+        kiosk mode on a wall screen needs nothing else.
+      rationale: >
+        A wall screen should show the house without anyone touching it, and
+        a problem should not wait for its turn in a long round. Doing it in
+        the page keeps the server and its API unchanged.
+      alternatives: >
+        Visiting only warned rooms while any exist (the other rooms would
+        never show during a long-lasting warning, such as a stuck sensor);
+        a red overlay on warned rooms (changes the temperature colour); a
+        separate kiosk page (a second page to keep in step with the view).
+    links:
+      - type: satisfies
+        target: REQ-UI-010
+      - type: satisfies
+        target: REQ-UI-006

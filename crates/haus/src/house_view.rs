@@ -70,12 +70,13 @@ pub fn body() -> String {
 <label>labels <select id="t-labels"><option value="compact" selected>compact</option><option value="full">full</option><option value="off">off</option></select></label>
 </div>
 <p id="views" class="row"></p>
+<p class="row"><button id="tour" type="button" aria-pressed="false" title="Visit the rooms one after another; rooms with a warning come up every other step">▶ Tour</button> <label>every <select id="every"><option value="5">5 s</option><option value="10" selected>10 s</option><option value="20">20 s</option><option value="30">30 s</option></select></label> <button id="fullscreen" type="button" title="Full screen (f)">Full screen</button></p>
 <label for="explode">Explode floors</label><input id="explode" type="range" min="0" max="8" step="0.1" value="2.5">
 <div class="scale"></div><div class="ticks"><span>16 °C</span><span>20</span><span>23</span><span>26 °C</span></div>
-<p class="dim">Colour: the room's air temperature (median of its air sensors; floor and radiator probes, stuck and silent sensors left out). Grey: no value. Click a room for its sensors.</p>
+<p class="dim">Colour: the room's air temperature (median of its air sensors; floor and radiator probes, stuck and silent sensors left out). Grey: no value. Red pulse: the room has a warning. Click a room for its sensors. On a wall screen open <code>house?tour=10</code>; touching the view pauses the tour for a minute.</p>
 <p class="dim" id="asof"></p>
 </div></div>
-<div id="info"></div></div>
+<div id="alerts" aria-live="polite"></div><div id="info"></div></div>
 <script type="importmap">{{"imports": {{"three": "./static/three-0.160.0.module.min.js", "three/addons/controls/OrbitControls.js": "./static/three-0.160.0-OrbitControls.js", "three/addons/renderers/CSS2DRenderer.js": "./static/three-0.160.0-CSS2DRenderer.js"}}}}</script>
 <script type="module" src="static/house3d.js?v={}"></script>"#,
         esc(env!("CARGO_PKG_VERSION"))
@@ -321,6 +322,29 @@ mod tests {
         for line in VIEWER.lines().filter(|l| l.starts_with("import ")) {
             let spec = line.split(['\'', '"']).nth(1).unwrap();
             assert!(map["imports"].get(spec).is_some(), "{spec}");
+        }
+    }
+
+    // Every element the viewer looks up exists on the page, the tour and
+    // full-screen controls included.
+    // rivet: verifies REQ-UI-010
+    // rivet: verifies DD-019
+    #[test]
+    fn every_element_the_viewer_uses_is_on_the_page() {
+        let b = body();
+        let ids: Vec<&str> = VIEWER
+            .split("$('")
+            .skip(1)
+            .map(|r| r.split('\'').next().unwrap())
+            .collect();
+        for id in ["tour", "every", "fullscreen", "alerts", "info", "view"] {
+            assert!(ids.contains(&id), "viewer does not use #{id}");
+        }
+        for id in &ids {
+            assert!(
+                b.contains(&format!(r#"id="{id}""#)),
+                "#{id} is not on the page"
+            );
         }
     }
 
