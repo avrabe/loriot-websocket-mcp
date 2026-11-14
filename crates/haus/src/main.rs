@@ -500,48 +500,22 @@ mod tests {
         assert_eq!(bind_host(s("  "), None), "0.0.0.0");
     }
 
-    /// Collects formatted log output.
-    #[derive(Clone, Default)]
-    struct LogBuf(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
-
-    impl std::io::Write for LogBuf {
-        fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
-            self.0.lock().unwrap().extend_from_slice(b);
-            Ok(b.len())
-        }
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
-    }
-
-    impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for LogBuf {
-        type Writer = LogBuf;
-        fn make_writer(&'a self) -> Self::Writer {
-            self.clone()
-        }
-    }
-
     #[tokio::test(flavor = "current_thread")]
     async fn requests_logged_at_info_except_health() {
         use axum::{body::Body, http::Request};
         use tower::ServiceExt;
-
-        let buf = LogBuf::default();
-        let subscriber = tracing_subscriber::fmt()
-            .with_writer(buf.clone())
-            .with_ansi(false)
-            .with_env_filter(tracing_subscriber::EnvFilter::new(DEFAULT_LOG_FILTER))
-            .finish();
-        let _guard = tracing::subscriber::set_default(subscriber);
-        // Other tests install a global subscriber; callsites they registered
-        // first keep that interest cached and would skip this one.
-        tracing::callsite::rebuild_interest_cache();
+        // The process-wide capture the Loxone tests use: a thread-local
+        // subscriber races with parallel tests (their threads cache the
+        // callsites as disabled) and came back empty on the self-hosted
+        // runner. A path only this test requests keeps the lines apart.
+        let logs = crate::loxone::tests::global_logs();
+        let ping = "/api/ping-logging-test";
 
         let app = with_http_layers(
-            Router::new().route("/api/ping", get(|| async { "pong" })),
+            Router::new().route(ping, get(|| async { "pong" })),
             Router::new().route("/health", get(|| async { "ok" })),
         );
-        for uri in ["/health", "/api/ping"] {
+        for uri in ["/health", ping] {
             let resp = app
                 .clone()
                 .oneshot(Request::get(uri).body(Body::empty()).unwrap())
@@ -550,16 +524,15 @@ mod tests {
             assert_eq!(resp.status(), StatusCode::OK, "{uri}");
         }
 
-        let log = String::from_utf8(buf.0.lock().unwrap().clone()).unwrap();
-        // Two requests, one logged: the API request, not /health. Counted
-        // by the response line, which does not depend on the request span
-        // (whose fields other tests' global subscriber can leave unrecorded).
-        assert_eq!(
-            log.matches("finished processing request").count(),
-            1,
-            "expected the API request logged once, /health not:\n{log}"
+        let log = String::from_utf8(logs.0.lock().unwrap().clone()).unwrap();
+        // The API request is logged at INFO with its path; /health is not
+        // logged (by any test: its route has no trace layer).
+        assert!(
+            log.lines()
+                .any(|l| l.contains(" INFO ") && l.contains(&format!("uri={ping}"))),
+            "API request not logged at INFO:\n{log}"
         );
-        assert!(!log.contains("/health"), "/health was logged:\n{log}");
+        assert!(!log.contains("uri=/health"), "/health was logged:\n{log}");
     }
 
     // rivet: verifies REQ-UI-008
