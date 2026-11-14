@@ -602,3 +602,38 @@ artifacts:
     links:
       - type: satisfies
         target: REQ-UI-011
+
+  - id: DD-021
+    type: design-decision
+    title: warte's idle scene reused, weather fetched by the server
+    status: implemented
+    release: v0.5.0
+    description: >
+      crates/haus/assets/idle.js is warte's templates/idle.js at eb27b67
+      (Apache-2.0, same author) with four marked changes; the weather comes
+      from a small server-side Open-Meteo client.
+    fields:
+      decision: >
+        The script is taken over, not rewritten, so the two apps' scenes stay
+        alike; the changes are marked "haus:" in it: settings from a JSON
+        script element (#idle-cfg), drawing into the house view (the
+        Fullscreen API shows only that element), the weather from
+        api/weather, and facts from api/house. The server rounds the place
+        to 0.1 degree before it leaves the house, asks every 30 minutes with
+        a 15 s timeout, keeps the last answer and serves it while under 3 h
+        old; a failure is logged, and the page then simply has no weather.
+        A test keeps outside URLs out of both scripts.
+      rationale: >
+        The owner wanted warte's scene in the house view, and the house page
+        talks to nothing but haus (REQ-UI-004); a server-side fetch keeps
+        that rule and sends Open-Meteo only a rounded place, once per 30
+        minutes for the whole household.
+      alternatives: >
+        The browser asking Open-Meteo as in warte (an outside request from
+        every page, with the time zone's city); weather only from the
+        house's own outdoor sensors (no rain or snow).
+    links:
+      - type: satisfies
+        target: REQ-UI-012
+      - type: satisfies
+        target: REQ-UI-004

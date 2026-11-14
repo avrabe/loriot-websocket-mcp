@@ -707,3 +707,26 @@ artifacts:
     links:
       - type: traces-to
         target: REQ-WARN-001
+
+  - id: REQ-UI-012
+    type: requirement
+    title: Idle scene with season, sky and weather over the house view
+    status: implemented
+    release: v0.5.0
+    description: >
+      After two minutes without input, the house view shows warte's idle
+      scene: a translucent seasonal layer with calendar moments, the sun and
+      moon for the house's place, the current weather there and facts about
+      the house (warmest and coolest room, rooms that need a look). The
+      house stays readable underneath; any input takes the scene away;
+      ?calm turns it off. The browser asks only haus: with HAUS_WEATHER_AT
+      set, haus fetches the weather from Open-Meteo every 30 minutes for
+      that place rounded to 0.1 degree and serves it at /api/weather (404
+      without a place or an answer under 3 h old); without it, the scene
+      shows the season and the sky for the browser's time zone.
+    fields:
+      priority: could
+      category: functional
+    links:
+      - type: traces-to
+        target: REQ-UI-006

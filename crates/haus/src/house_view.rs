@@ -22,13 +22,16 @@ pub const THREE: &str = include_str!("../assets/three-0.160.0.module.min.js");
 pub const ORBIT: &str = include_str!("../assets/three-0.160.0-OrbitControls.js");
 pub const CSS2D: &str = include_str!("../assets/three-0.160.0-CSS2DRenderer.js");
 pub const VIEWER: &str = include_str!("../assets/house3d.js");
+/// warte's idle scene, adapted (REQ-UI-012).
+pub const IDLE: &str = include_str!("../assets/idle.js");
 
 /// The static files of this page: (name, body).
-pub const ASSETS: [(&str, &str); 4] = [
+pub const ASSETS: [(&str, &str); 5] = [
     ("three-0.160.0.module.min.js", THREE),
     ("three-0.160.0-OrbitControls.js", ORBIT),
     ("three-0.160.0-CSS2DRenderer.js", CSS2D),
     ("house3d.js", VIEWER),
+    ("idle.js", IDLE),
 ];
 
 static HOUSE: std::sync::OnceLock<House> = std::sync::OnceLock::new();
@@ -57,6 +60,19 @@ pub fn configured() -> bool {
 }
 
 /// The page body: the canvas, the panel, the info box and the scripts.
+/// The idle scene's settings: it draws inside the house view; with a
+/// weather place, the sky is computed for it and the weather is asked of
+/// haus. JSON in a script element, so `<` is escaped.
+fn idle_cfg() -> String {
+    let mut c = serde_json::json!({"host": ".house3d", "weather": false});
+    if let Some(p) = crate::weather::place() {
+        c["lat"] = p.lat.into();
+        c["lon"] = p.lon.into();
+        c["weather"] = true.into();
+    }
+    c.to_string().replace('<', "\\u003c")
+}
+
 pub fn body() -> String {
     format!(
         r#"<div class="house3d"><div id="view"></div>
@@ -78,8 +94,11 @@ pub fn body() -> String {
 </div></div>
 <div id="alerts" aria-live="polite"></div><div id="info"></div></div>
 <script type="importmap">{{"imports": {{"three": "./static/three-0.160.0.module.min.js", "three/addons/controls/OrbitControls.js": "./static/three-0.160.0-OrbitControls.js", "three/addons/renderers/CSS2DRenderer.js": "./static/three-0.160.0-CSS2DRenderer.js"}}}}</script>
-<script type="module" src="static/house3d.js?v={}"></script>"#,
-        esc(env!("CARGO_PKG_VERSION"))
+<script type="module" src="static/house3d.js?v={v}"></script>
+<script type="application/json" id="idle-cfg">{idle}</script>
+<script src="static/idle.js?v={v}" defer></script>"#,
+        v = esc(env!("CARGO_PKG_VERSION")),
+        idle = idle_cfg(),
     )
 }
 
@@ -316,8 +335,25 @@ mod tests {
             .skip(1)
             .map(|r| r.split('"').next().unwrap())
             .collect();
-        assert_eq!(srcs.len(), 1);
-        assert!(srcs[0].starts_with("static/house3d.js?v="));
+        // The viewer and the idle scene, both served by haus.
+        assert_eq!(srcs.len(), 2, "{srcs:?}");
+        for src in &srcs {
+            let name = src
+                .strip_prefix("static/")
+                .unwrap()
+                .split('?')
+                .next()
+                .unwrap();
+            assert!(ASSETS.iter().any(|(n, _)| *n == name), "{src}");
+        }
+        // Neither script asks anything outside haus (the weather comes from
+        // haus's api/weather, REQ-UI-012).
+        for (name, js) in [("house3d.js", VIEWER), ("idle.js", IDLE)] {
+            assert!(
+                !js.contains("http://") && !js.contains("https://"),
+                "{name} names an outside URL"
+            );
+        }
         let map = b.split(r#"<script type="importmap">"#).nth(1).unwrap();
         let map: serde_json::Value =
             serde_json::from_str(map.split("</script>").next().unwrap()).unwrap();
