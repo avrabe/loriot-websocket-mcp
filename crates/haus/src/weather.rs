@@ -26,6 +26,10 @@ pub struct Current {
     pub temperature_2m: f64,
     pub weather_code: i64,
     pub wind_speed_10m: f64,
+    /// Where the wind comes from, degrees clockwise from north; absent
+    /// where the source does not say.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wind_direction_10m: Option<f64>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -72,7 +76,7 @@ pub fn place() -> Option<Place> {
 /// The request for a place: only the rounded coordinates leave the house.
 pub fn url(p: Place) -> String {
     format!(
-        "https://api.open-meteo.com/v1/forecast?latitude={:.1}&longitude={:.1}&current=temperature_2m,weather_code,wind_speed_10m",
+        "https://api.open-meteo.com/v1/forecast?latitude={:.1}&longitude={:.1}&current=temperature_2m,weather_code,wind_speed_10m,wind_direction_10m",
         p.lat, p.lon
     )
 }
@@ -178,14 +182,15 @@ mod tests {
     fn the_answer_is_read_and_old_weather_is_not_served() {
         let body = r#"{"latitude":12.3,"longitude":45.7,"current_units":{},
             "current":{"time":"2026-11-14T12:00","interval":900,"temperature_2m":6.4,
-            "weather_code":61,"wind_speed_10m":12.0}}"#;
+            "weather_code":61,"wind_speed_10m":12.0,"wind_direction_10m":250}}"#;
         let c = parse_answer(body).unwrap();
         assert_eq!(
             c,
             Current {
                 temperature_2m: 6.4,
                 weather_code: 61,
-                wind_speed_10m: 12.0
+                wind_speed_10m: 12.0,
+                wind_direction_10m: Some(250.0)
             }
         );
         assert!(parse_answer(r#"{"error":true,"reason":"x"}"#).is_err());
