@@ -184,11 +184,19 @@ pub fn wmo_from(text: &str, precipitation: f64, temperature: f64) -> i64 {
     }
 }
 
-/// The weather to show: the Miniserver's while fresh, else Open-Meteo's.
+/// The weather to show: the Miniserver's while fresh, else Open-Meteo's
+/// while fresh.
+fn pick(loxone: Option<Answer>, open_meteo: Option<Answer>, now_ms: i64) -> Option<Answer> {
+    let ok = |a: Option<Answer>| a.filter(|a| now_ms - a.fetched_ms <= MAX_AGE_MS);
+    ok(loxone).or_else(|| ok(open_meteo))
+}
+
 fn fresh(now_ms: i64) -> Option<Answer> {
-    let ok = |a: &Option<Answer>| a.clone().filter(|a| now_ms - a.fetched_ms <= MAX_AGE_MS);
-    ok(&LOXONE.read().unwrap_or_else(|e| e.into_inner()))
-        .or_else(|| ok(&LAST.read().unwrap_or_else(|e| e.into_inner())))
+    pick(
+        LOXONE.read().unwrap_or_else(|e| e.into_inner()).clone(),
+        LAST.read().unwrap_or_else(|e| e.into_inner()).clone(),
+        now_ms,
+    )
 }
 
 /// Ask Open-Meteo now and every 30 minutes; a failure keeps the last answer
@@ -320,8 +328,37 @@ mod tests {
             }
         );
         assert!(parse_answer(r#"{"error":true,"reason":"x"}"#).is_err());
-        store(c.clone(), 1_000);
-        assert_eq!(fresh(1_000 + MAX_AGE_MS).map(|a| a.current), Some(c));
-        assert!(fresh(1_001 + MAX_AGE_MS).is_none());
+        // Which answer is shown, without the shared state other tests touch.
+        let a = |source, fetched_ms| {
+            Some(Answer {
+                current: c.clone(),
+                fetched_ms,
+                source,
+            })
+        };
+        let now = 10 * MAX_AGE_MS;
+        let shown = |l, o| pick(l, o, now).map(|a| a.source);
+        assert_eq!(
+            shown(a("loxone", now), a("open-meteo", now)),
+            Some("loxone")
+        );
+        // The Miniserver's answer gone stale: Open-Meteo's, if fresh.
+        assert_eq!(
+            shown(a("loxone", now - MAX_AGE_MS - 1), a("open-meteo", now)),
+            Some("open-meteo")
+        );
+        assert_eq!(
+            shown(None, a("open-meteo", now - MAX_AGE_MS)),
+            Some("open-meteo")
+        );
+        // Both too old, or none: no weather.
+        assert_eq!(
+            shown(
+                a("loxone", now - MAX_AGE_MS - 1),
+                a("open-meteo", now - MAX_AGE_MS - 1)
+            ),
+            None
+        );
+        assert_eq!(shown(None, None), None);
     }
 }
