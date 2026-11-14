@@ -362,13 +362,25 @@ artifacts:
   - id: REQ-DEPLOY-001
     type: requirement
     title: A signed linux-arm64 release that deployment tooling can verify
-    status: approved
+    status: implemented
     release: v0.4.0
     description: >
       Tags build static binaries with SHA256SUMS.txt signed by cosign (keyless,
       release workflow identity) and an SBOM, as for 0.3.0, so deployment
       tooling can verify the release and pin the binary's sha256.
     fields:
+      evidence: >
+        The deployment tooling verifies each release before pinning it, by a
+        fetch step that downloads the binary, SHA256SUMS.txt and its cosign
+        bundle and runs cosign verify-blob (workflow identity, GitHub OIDC
+        issuer), sha256 -c, and gh attestation verify, stopping on any
+        failure; only then is the linux-arm64 sha256 pinned. The install
+        step accepts only a binary with the pinned sha256, checked on the
+        controller and again on the host. Re-run on 0.4.0-rc.8, 2026-11-14:
+        cosign "Verified OK", the binary's checksum OK, attestation verify
+        exit 0; the pinned sha256 equals the SHA256SUMS.txt entry and the
+        installed binary. The signature check binds to the install through
+        the pin: the install step itself does not run cosign.
       priority: must
       category: constraint
 
