@@ -669,9 +669,12 @@ artifacts:
     description: >
       The 3D house view can tour the rooms on its own: every 5, 10, 20 or
       30 s it flies to the next room with sensors, hides the floors above
-      it and shows its values and warnings. Rooms with a warning come up
-      every other step, and a warning that appears on a refresh is shown at
-      once. Warned rooms glow in their own colour and are listed in a strip
+      it and shows its values and warnings. Every fourth step shows the
+      whole house from one of the model's viewpoints in turn, a little
+      different each time (bearing ±15°, distance and height ±10 %), and
+      the camera drifts slowly around what it shows. Rooms with an alarm
+      come up every other room step, and an alarm that appears on a refresh
+      is shown at once. Warned rooms glow in their own colour and are listed in a strip
       on top of the view (a click flies there). house?tour=<seconds> starts
       the tour with the panel collapsed, for a wall screen; touching the
       view pauses it for a minute. The view goes full screen (button in the

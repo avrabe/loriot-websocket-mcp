@@ -542,10 +542,12 @@ artifacts:
       house3d.js; the server only adds the controls to the page.
     fields:
       decision: >
-        The tour visits the rooms with sensors, top floor first. When rooms
-        have warnings, every other step is the next warned room, so a
-        warning is never more than one step away and the other rooms still
-        come up. The minute refresh compares the warned rooms before and
+        The tour visits the rooms with sensors, top floor first; every
+        fourth step is an overview from the model's next viewpoint, jittered
+        so it never repeats exactly, and OrbitControls' autoRotate drifts the
+        camera slowly while nobody touches the view. When rooms have alarms,
+        every other room step is the next alarmed room, so an alarm is never
+        more than two steps away and the other rooms still come up. The minute refresh compares the warned rooms before and
         after and flies to a new one at once. The camera eases towards the
         room keeping its viewing direction (at least 40 degrees from
         above), the floors above the room are hidden and walls and roofs
