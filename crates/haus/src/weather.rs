@@ -1,4 +1,8 @@
-//! Current weather for the house view's idle scene (REQ-UI-012, DD-021).
+//! Current weather for the house view (REQ-UI-012, DD-021).
+//!
+//! First choice is the Miniserver's Loxone Weather Service, which arrives
+//! over the websocket haus already has: nothing leaves the house. Open-Meteo
+//! is the fallback for a deployment without one.
 //!
 //! With HAUS_WEATHER_AT ("<lat>,<lon>") set, the server asks Open-Meteo every
 //! 30 minutes for the current temperature, weather code and wind at that
@@ -30,16 +34,22 @@ pub struct Current {
     /// where the source does not say.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wind_direction_10m: Option<f64>,
+    /// The source's own words for the weather (the Miniserver's type text).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
 struct Answer {
     current: Current,
     fetched_ms: i64,
+    /// "loxone" or "open-meteo".
+    source: &'static str,
 }
 
 static PLACE: OnceLock<Place> = OnceLock::new();
 static LAST: RwLock<Option<Answer>> = RwLock::new(None);
+static LOXONE: RwLock<Option<Answer>> = RwLock::new(None);
 
 /// An answer older than this is not served: no weather beats old weather.
 const MAX_AGE_MS: i64 = 3 * 3_600_000;
@@ -96,14 +106,89 @@ fn store(c: Current, now_ms: i64) {
     *LAST.write().unwrap_or_else(|e| e.into_inner()) = Some(Answer {
         current: c,
         fetched_ms: now_ms,
+        source: "open-meteo",
     });
 }
 
+/// The Miniserver's current weather (its weatherServer "actual" state).
+pub fn store_loxone(e: &haus_core::loxone::WeatherEntry, text: Option<&str>, now_ms: i64) {
+    let c = Current {
+        temperature_2m: e.temperature,
+        weather_code: wmo_from(text.unwrap_or(""), e.precipitation, e.temperature),
+        wind_speed_10m: e.wind_speed,
+        wind_direction_10m: Some(e.wind_direction as f64),
+        text: text.map(str::to_string),
+    };
+    *LOXONE.write().unwrap_or_else(|e| e.into_inner()) = Some(Answer {
+        current: c,
+        fetched_ms: now_ms,
+        source: "loxone",
+    });
+}
+
+/// A WMO weather code for a weather text (German or English, as the
+/// Miniserver names its types), so the page draws rain, snow, fog or a
+/// storm the same way for either source. Without a known word the
+/// precipitation decides.
+pub fn wmo_from(text: &str, precipitation: f64, temperature: f64) -> i64 {
+    let t = text.to_lowercase();
+    let has = |ws: &[&str]| ws.iter().any(|w| t.contains(w));
+    let light = has(&["leicht", "light"]);
+    let heavy = has(&["stark", "heavy", "kräftig"]);
+    if has(&["gewitter", "thunder"]) {
+        95
+    } else if has(&["schneeregen", "sleet", "gefrier", "freezing"]) {
+        66
+    } else if has(&["schnee", "snow"]) {
+        if light {
+            71
+        } else if heavy {
+            75
+        } else {
+            73
+        }
+    } else if has(&["schauer", "shower"]) {
+        if heavy {
+            82
+        } else {
+            80
+        }
+    } else if has(&["niesel", "drizzle"]) {
+        53
+    } else if has(&["regen", "rain"]) {
+        if light {
+            61
+        } else if heavy {
+            65
+        } else {
+            63
+        }
+    } else if has(&["nebel", "fog", "dunst", "mist"]) {
+        45
+    } else if has(&["bedeckt", "overcast", "stark bewölkt"]) {
+        3
+    } else if has(&["bewölkt", "wolkig", "cloud"]) {
+        2
+    } else if has(&["wolkenlos", "klar", "clear", "sonnig", "sunny"]) {
+        0
+    } else if has(&["heiter", "fair"]) {
+        1
+    } else if precipitation > 0.0 {
+        if temperature <= 0.0 {
+            71
+        } else {
+            61
+        }
+    } else {
+        2
+    }
+}
+
+/// The weather to show: the Miniserver's while fresh, else Open-Meteo's.
 fn fresh(now_ms: i64) -> Option<Answer> {
-    LAST.read()
-        .unwrap_or_else(|e| e.into_inner())
-        .clone()
-        .filter(|a| now_ms - a.fetched_ms <= MAX_AGE_MS)
+    let ok = |a: &Option<Answer>| a.clone().filter(|a| now_ms - a.fetched_ms <= MAX_AGE_MS);
+    ok(&LOXONE.read().unwrap_or_else(|e| e.into_inner()))
+        .or_else(|| ok(&LAST.read().unwrap_or_else(|e| e.into_inner())))
 }
 
 /// Ask Open-Meteo now and every 30 minutes; a failure keeps the last answer
@@ -138,11 +223,22 @@ pub async fn run(p: Place) {
     }
 }
 
-/// GET /api/weather: the last answer, or 404 without a place or a fresh one.
+/// The Miniserver's weather as stored (tests).
+#[cfg(test)]
+pub fn current_for_tests() -> Option<Current> {
+    LOXONE
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
+        .map(|a| a.current)
+}
+
+/// GET /api/weather: the freshest answer, or 404 when there is none under
+/// 3 h old.
 pub async fn weather_api() -> Response {
     match fresh(crate::dashboard::now_ms()) {
-        Some(a) if place().is_some() => Json(a).into_response(),
-        _ => StatusCode::NOT_FOUND.into_response(),
+        Some(a) => Json(a).into_response(),
+        None => StatusCode::NOT_FOUND.into_response(),
     }
 }
 
@@ -177,6 +273,35 @@ mod tests {
         assert!(!u.contains("12.34") && !u.contains("45.67"), "{u}");
     }
 
+    // The Miniserver's weather words become codes the page draws.
+    // rivet: verifies REQ-UI-012
+    #[test]
+    fn weather_words_become_codes() {
+        for (t, code) in [
+            ("wolkenlos", 0),
+            ("heiter", 1),
+            ("wolkig", 2),
+            ("bedeckt", 3),
+            ("Nebel", 45),
+            ("Nieselregen", 53),
+            ("leichter Regen", 61),
+            ("Regen", 63),
+            ("starker Regen", 65),
+            ("Regenschauer", 80),
+            ("Schneeregen", 66),
+            ("leichter Schneefall", 71),
+            ("Schneefall", 73),
+            ("Gewitter", 95),
+            ("light rain", 61),
+        ] {
+            assert_eq!(wmo_from(t, 0.0, 5.0), code, "{t}");
+        }
+        // No known word: the precipitation and temperature decide.
+        assert_eq!(wmo_from("", 1.2, -2.0), 71);
+        assert_eq!(wmo_from("", 1.2, 4.0), 61);
+        assert_eq!(wmo_from("", 0.0, 4.0), 2);
+    }
+
     // rivet: verifies REQ-UI-012
     #[test]
     fn the_answer_is_read_and_old_weather_is_not_served() {
@@ -190,7 +315,8 @@ mod tests {
                 temperature_2m: 6.4,
                 weather_code: 61,
                 wind_speed_10m: 12.0,
-                wind_direction_10m: Some(250.0)
+                wind_direction_10m: Some(250.0),
+                text: None
             }
         );
         assert!(parse_answer(r#"{"error":true,"reason":"x"}"#).is_err());

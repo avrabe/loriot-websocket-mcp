@@ -53,8 +53,9 @@ el.appendChild(renderer.domElement);
 const labels = new CSS2DRenderer(); labels.setSize(W, H);
 Object.assign(labels.domElement.style, { position: 'absolute', top: 0, left: 0, pointerEvents: 'none' });
 el.appendChild(labels.domElement);
-scene.add(new THREE.HemisphereLight(0xffffff, 0x8a7f72, 1.1));
+const hemi = new THREE.HemisphereLight(0xffffff, 0x8a7f72, 1.1); scene.add(hemi);
 const sun = new THREE.DirectionalLight(0xffffff, 1.2); sun.position.set(20, 40, 25); scene.add(sun);
+const baseBg = scene.background.clone();
 
 // Plan metres (x, y) -> three (x, z = -y), centred on the buildings (or rooms).
 const bbox = ps => { const xs = ps.map(p => p[0]), ys = ps.map(p => p[1]); return [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)]; };
@@ -468,6 +469,103 @@ document.addEventListener('keydown', e => {
 });
 document.addEventListener('fullscreenchange', fsLabel);
 document.addEventListener('webkitfullscreenchange', fsLabel);
+// Weather and sky in the scene (REQ-UI-014): the sun lights the house from
+// where it stands (time, place, the model's north), dusk and night darken
+// the scene, overcast dims the sun, rain, snow or fog fall around the house
+// slanted by the wind. The weather comes from haus (api/weather: the
+// Miniserver's weather service, else Open-Meteo); none, and only the sky
+// changes. The checkbox in the panel turns it off.
+let wx = null;
+const wxBox = $('t-weather'), wxLine = $('wx');
+function geoPlace() {
+  const w = window.hausIdle && window.hausIdle.where ? window.hausIdle.where() : null;
+  return w ? [w.lat, w.lon] : [51, 10];
+}
+// The sun's azimuth (degrees from north, clockwise) and elevation.
+function sunPos(t, lat, lon) {
+  const r = Math.PI / 180, d = t / 86400000 - 10957.5;
+  const g = (357.529 + 0.98560028 * d) * r, q = 280.459 + 0.98564736 * d;
+  const L = (q + 1.915 * Math.sin(g) + 0.020 * Math.sin(2 * g)) * r, e = (23.439 - 0.00000036 * d) * r;
+  const ra = Math.atan2(Math.cos(e) * Math.sin(L), Math.cos(L)), dec = Math.asin(Math.sin(e) * Math.sin(L));
+  const H = ((280.46061837 + 360.98564736629 * d + lon) % 360) * r - ra, la = lat * r;
+  const el = Math.asin(Math.sin(la) * Math.sin(dec) + Math.cos(la) * Math.cos(dec) * Math.cos(H));
+  const az = Math.atan2(-Math.sin(H), Math.tan(dec) * Math.cos(la) - Math.sin(la) * Math.cos(H));
+  return { az: (az / r + 360) % 360, el: el / r };
+}
+const night = new THREE.Color(dark ? 0x0b1020 : 0x1e2a44), grey = new THREE.Color(dark ? 0x2a2a2e : 0xc9cdd2);
+const warm = new THREE.Color(0xffb36b), white = new THREE.Color(0xffffff);
+const kind = c => c == null ? null : c >= 95 ? 'storm' : (c >= 71 && c <= 77) || c === 85 || c === 86 ? 'snow'
+  : c >= 51 ? 'rain' : c === 45 || c === 48 ? 'fog' : c >= 3 ? 'overcast' : c >= 2 ? 'cloudy' : 'clear';
+// Particles in a box around the buildings.
+const fx = new THREE.Group(); scene.add(fx);
+const boxW = span * 1.6, boxH = 30;
+let drops = null, flakes = null, flash = 0;
+function particles(n, rain) {
+  fx.clear();
+  drops = flakes = null;
+  if (!n) return;
+  const pos = new Float32Array(n * (rain ? 6 : 3));
+  for (let i = 0; i < n; i++) {
+    const x = (Math.random() - 0.5) * boxW, y = Math.random() * boxH, z = (Math.random() - 0.5) * boxW;
+    if (rain) pos.set([x, y, z, x, y + 0.6, z], i * 6); else pos.set([x, y, z], i * 3);
+  }
+  const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  if (rain) { drops = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ color: dark ? 0x93c5fd : 0x5b7fa6, transparent: true, opacity: 0.55 })); fx.add(drops); }
+  else { flakes = new THREE.Points(geo, new THREE.PointsMaterial({ color: 0xffffff, size: 0.22, transparent: true, opacity: 0.9 })); fx.add(flakes); }
+}
+function applyWeather() {
+  const on = wxBox.checked, k = on && wx ? kind(wx.weather_code) : null;
+  const heavy = wx && [65, 67, 75, 82, 86, 95, 96, 99].includes(wx.weather_code), light = wx && [51, 53, 61, 71, 80, 85].includes(wx.weather_code);
+  const n = k === 'rain' || k === 'storm' ? (heavy ? 2600 : light ? 900 : 1600) : k === 'snow' ? (heavy ? 2200 : light ? 700 : 1400) : 0;
+  particles(n, k === 'rain' || k === 'storm');
+  scene.fog = k === 'fog' ? new THREE.Fog(grey, span * 0.6, span * 3) : null;
+  wxLine.textContent = wx ? 'Outside: ' + Math.round(wx.temperature_2m) + ' °C, ' + (wx.text || k) +
+    (wx.wind_speed_10m >= 20 ? ', wind ' + Math.round(wx.wind_speed_10m) + ' km/h' : '') + '.' : '';
+}
+async function loadWeather() {
+  try {
+    const r = await fetch('api/weather', { headers: { accept: 'application/json' } });
+    wx = r.ok ? (await r.json()).current : null;
+  } catch (e) { wx = null; }
+  applyWeather();
+}
+wxBox.addEventListener('change', applyWeather);
+loadWeather(); setInterval(loadWeather, 5 * 60_000);
+// Light and sky for the moment; called every frame (cheap).
+function sky(now, dt) {
+  const [lat, lon] = geoPlace(), s = sunPos(now, lat, lon), k = wxBox.checked && wx ? kind(wx.weather_code) : null;
+  const [dx, dy] = bearing(s.az), c = Math.cos(s.el * Math.PI / 180), R = span * 2;
+  sun.position.set(dx * c * R, Math.max(Math.sin(s.el * Math.PI / 180), 0.05) * R, -dy * c * R);
+  const day = THREE.MathUtils.smoothstep(s.el, -6, 6);          // civil twilight
+  const dim = k === 'overcast' || k === 'fog' ? 0.45 : k === 'rain' || k === 'snow' || k === 'storm' ? 0.35 : k === 'cloudy' ? 0.75 : 1;
+  sun.intensity = (s.el > 0 ? 0.4 + Math.min(1, s.el / 30) : 0) * dim * 1.2;
+  sun.color.copy(white).lerp(warm, 1 - THREE.MathUtils.smoothstep(s.el, 2, 18));
+  hemi.intensity = 0.35 + 0.75 * day;
+  const bg = night.clone().lerp(dim < 1 ? baseBg.clone().lerp(grey, 1 - dim) : baseBg, day);
+  if (flash > 0) { flash -= dt; hemi.intensity += 2; bg.lerp(white, 0.5); }
+  else if (k === 'storm' && Math.random() < 0.002) flash = 0.12;
+  scene.background.copy(bg);
+  if (scene.fog) scene.fog.color.copy(bg);
+  // Particles fall, drift with the wind (it blows towards from + 180°).
+  const wind = wx && wx.wind_direction_10m != null ? bearing(wx.wind_direction_10m + 180) : [0, 0];
+  const ws = wx ? Math.min(wx.wind_speed_10m || 0, 60) / 10 : 0;
+  const p = (drops || flakes);
+  if (p) {
+    const a = p.geometry.attributes.position.array, rain = !!drops, step = rain ? 6 : 3, v = rain ? 22 : 1.4;
+    for (let i = 0; i < a.length; i += step) {
+      const sway = rain ? 0 : Math.sin(now / 700 + i) * 0.3;
+      for (let j = 0; j < step; j += 3) {
+        a[i + j] += (wind[0] * ws + sway) * dt; a[i + j + 1] -= v * dt; a[i + j + 2] += -wind[1] * ws * dt;
+      }
+      if (a[i + 1] < 0) {
+        const x = (Math.random() - 0.5) * boxW, z = (Math.random() - 0.5) * boxW;
+        a[i] = x; a[i + 1] = boxH; a[i + 2] = z;
+        if (rain) { a[i + 3] = x + wind[0] * ws * 0.03; a[i + 4] = boxH + 0.6; a[i + 5] = z - wind[1] * ws * 0.03; }
+      }
+    }
+    p.geometry.attributes.position.needsUpdate = true;
+  }
+}
 applyValues();
 // ?tour or ?tour=<seconds> starts the tour (a wall screen).
 {
@@ -504,7 +602,10 @@ function declutter() {
   }
 }
 const pulseOff = new THREE.Color(0x000000);
+let lastFrame = 0;
 (function loop(now) {
+  const dt = Math.min(0.05, lastFrame ? ((now || 0) - lastFrame) / 1000 : 0.016); lastFrame = now || 0;
+  sky(Date.now(), dt);
   if (fly) {
     controls.target.lerp(fly.t, 0.08); camera.position.lerp(fly.p, 0.08);
     if (camera.position.distanceTo(fly.p) < 0.05) fly = null;

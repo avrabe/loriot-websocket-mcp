@@ -64,11 +64,12 @@ pub fn configured() -> bool {
 /// weather place, the sky is computed for it and the weather is asked of
 /// haus. JSON in a script element, so `<` is escaped.
 fn idle_cfg() -> String {
-    let mut c = serde_json::json!({"host": ".house3d", "weather": false});
+    // The weather may come from the Miniserver without any place set, so
+    // the scene always asks haus (a 404 just means none).
+    let mut c = serde_json::json!({"host": ".house3d", "weather": true});
     if let Some(p) = crate::weather::place() {
         c["lat"] = p.lat.into();
         c["lon"] = p.lon.into();
-        c["weather"] = true.into();
     }
     c.to_string().replace('<', "\\u003c")
 }
@@ -83,6 +84,7 @@ pub fn body() -> String {
 <label><input type="checkbox" id="t-site" checked> surroundings</label>
 <label><input type="checkbox" id="t-roof"> walls and roofs</label>
 <label><input type="checkbox" id="t-tags"> unit numbers</label>
+<label><input type="checkbox" id="t-weather" checked> weather</label>
 <label>labels <select id="t-labels"><option value="compact" selected>compact</option><option value="full">full</option><option value="off">off</option></select></label>
 </div>
 <p id="views" class="row"></p>
@@ -90,6 +92,7 @@ pub fn body() -> String {
 <label for="explode">Explode floors</label><input id="explode" type="range" min="0" max="8" step="0.1" value="2.5">
 <div class="scale"></div><div class="ticks"><span>16 °C</span><span>20</span><span>23</span><span>26 °C</span></div>
 <p class="dim">Colour: the room's air temperature (median of its air sensors; floor and radiator probes, stuck and silent sensors left out). Grey: no value. Red pulse: the room has a warning. Click a room for its sensors. On a wall screen open <code>house?tour=10</code>; touching the view pauses the tour for a minute.</p>
+<p class="dim" id="wx"></p>
 <p class="dim" id="asof"></p>
 </div></div>
 <div id="alerts" aria-live="polite"></div><div id="info"></div></div>
@@ -375,6 +378,7 @@ mod tests {
     // full-screen controls included.
     // rivet: verifies REQ-UI-010
     // rivet: verifies DD-019
+    // rivet: verifies REQ-UI-014
     #[test]
     fn every_element_the_viewer_uses_is_on_the_page() {
         let b = body();
@@ -383,7 +387,16 @@ mod tests {
             .skip(1)
             .map(|r| r.split('\'').next().unwrap())
             .collect();
-        for id in ["tour", "every", "fullscreen", "alerts", "info", "view"] {
+        for id in [
+            "tour",
+            "every",
+            "fullscreen",
+            "alerts",
+            "info",
+            "view",
+            "t-weather",
+            "wx",
+        ] {
             assert!(ids.contains(&id), "viewer does not use #{id}");
         }
         for id in &ids {

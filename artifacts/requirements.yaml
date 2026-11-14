@@ -719,11 +719,13 @@ artifacts:
       moon for the house's place, the current weather there and facts about
       the house (warmest and coolest room, rooms that need a look). The
       house stays readable underneath; any input takes the scene away;
-      ?calm turns it off. The browser asks only haus: with HAUS_WEATHER_AT
-      set, haus fetches the weather from Open-Meteo every 30 minutes for
-      that place rounded to 0.1 degree and serves it at /api/weather (404
-      without a place or an answer under 3 h old); without it, the scene
-      shows the season and the sky for the browser's time zone.
+      ?calm turns it off. The browser asks only haus, at /api/weather (404
+      when no answer is under 3 h old). The weather comes first from the
+      Miniserver's Loxone Weather Service, over the websocket haus already
+      has (the structure file's weatherServer "actual" state, binary
+      weather tables), so nothing leaves the house; with HAUS_WEATHER_AT
+      set, Open-Meteo is the fallback, asked every 30 minutes for that
+      place rounded to 0.1 degree.
     fields:
       priority: could
       category: functional
@@ -749,3 +751,24 @@ artifacts:
     links:
       - type: traces-to
         target: REQ-UI-010
+
+  - id: REQ-UI-014
+    type: requirement
+    title: Weather and sky in the 3D view
+    status: implemented
+    release: v0.5.0
+    description: >
+      The 3D house view shows the weather around the house: the sun lights
+      it from where the sun stands (time, place, the model's north), dusk
+      and night darken the scene, overcast and fog dim the sun, rain or snow
+      falls around the house slanted by the wind's direction, a storm
+      flashes, fog closes in; the panel says "Outside: <temperature>,
+      <the source's words>". The weather is that of /api/weather
+      (REQ-UI-012); without one only the sky changes. A checkbox turns it
+      off.
+    fields:
+      priority: could
+      category: functional
+    links:
+      - type: traces-to
+        target: REQ-UI-012
