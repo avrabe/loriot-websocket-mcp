@@ -551,11 +551,14 @@ mod tests {
         }
 
         let log = String::from_utf8(buf.0.lock().unwrap().clone()).unwrap();
-        assert!(
-            log.contains("uri=/api/ping"),
-            "API request not logged:\n{log}"
+        // Two requests, one logged: the API request, not /health. Counted
+        // by the response line, which does not depend on the request span
+        // (whose fields other tests' global subscriber can leave unrecorded).
+        assert_eq!(
+            log.matches("finished processing request").count(),
+            1,
+            "expected the API request logged once, /health not:\n{log}"
         );
-        assert!(log.contains("finished processing request"), "{log}");
         assert!(!log.contains("/health"), "/health was logged:\n{log}");
     }
 
