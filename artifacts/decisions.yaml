@@ -637,3 +637,29 @@ artifacts:
         target: REQ-UI-012
       - type: satisfies
         target: REQ-UI-004
+
+  - id: DD-022
+    type: design-decision
+    title: A web app manifest instead of more full-screen code
+    status: implemented
+    release: v0.5.0
+    description: >
+      Full screen on iPad browsers comes from installing the page, not from
+      script; haus serves a manifest and two PNG icons from the binary.
+    fields:
+      decision: >
+        static/manifest.webmanifest (display fullscreen, display_override
+        fullscreen then standalone, scope the haus root, no start_url),
+        icon-180.png and icon-512.png (the favicon's house, drawn into the
+        binary), and the apple-mobile-web-app tags with the default status
+        bar. house?tour also turns on the fill-the-window view, so a wall
+        tablet started from the home screen shows only the house.
+      rationale: >
+        iPadOS lets no page hide the browser's bars, and all iPad browsers
+        are WebKit; an installed web app opens without them.
+      alternatives: >
+        A native wrapper app (a second thing to build and update); Guided
+        Access alone (locks the tablet but keeps the browser bars).
+    links:
+      - type: satisfies
+        target: REQ-UI-013

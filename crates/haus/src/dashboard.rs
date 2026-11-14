@@ -757,12 +757,21 @@ pub async fn status_page(State(state): State<AppState>) -> Response {
 }
 
 /// GET /static/haus.css and /static/htmx-2.0.4.min.js
+/// What makes haus installable on a home screen: there it opens without
+/// the browser's bars (the only way to full screen on iPad browsers).
+const MANIFEST: &str = include_str!("../assets/manifest.webmanifest");
+const ICON_180: &[u8] = include_bytes!("../assets/icon-180.png");
+const ICON_512: &[u8] = include_bytes!("../assets/icon-512.png");
+
 pub async fn static_file(Path(name): Path<String>) -> Response {
-    let (body, ctype) = match name.as_str() {
-        "haus.css" => (CSS, "text/css; charset=utf-8"),
-        "htmx-2.0.4.min.js" => (HTMX, "text/javascript; charset=utf-8"),
+    let (body, ctype): (&[u8], &str) = match name.as_str() {
+        "haus.css" => (CSS.as_bytes(), "text/css; charset=utf-8"),
+        "htmx-2.0.4.min.js" => (HTMX.as_bytes(), "text/javascript; charset=utf-8"),
+        "manifest.webmanifest" => (MANIFEST.as_bytes(), "application/manifest+json"),
+        "icon-180.png" => (ICON_180, "image/png"),
+        "icon-512.png" => (ICON_512, "image/png"),
         n => match crate::house_view::ASSETS.iter().find(|(a, _)| *a == n) {
-            Some((_, body)) => (*body, "text/javascript; charset=utf-8"),
+            Some((_, body)) => (body.as_bytes(), "text/javascript; charset=utf-8"),
             None => return StatusCode::NOT_FOUND.into_response(),
         },
     };
@@ -1312,6 +1321,41 @@ mod tests {
         let status = r.status();
         let body = axum::body::to_bytes(r.into_body(), 10 << 20).await.unwrap();
         (status, String::from_utf8_lossy(&body).into_owned())
+    }
+
+    // The page can be installed on a home screen, where it opens without
+    // the browser's bars; the manifest names only files haus serves.
+    // rivet: verifies REQ-UI-013
+    #[tokio::test]
+    async fn the_page_is_installable_as_a_home_screen_app() {
+        use tower::ServiceExt;
+        let app = app(test_state("manifest", AppConfig::default()));
+        let page = page("x", "").0;
+        assert!(page.contains(r#"<link rel="manifest" href="static/manifest.webmanifest">"#));
+        assert!(page.contains(r#"<link rel="apple-touch-icon" href="static/icon-180.png">"#));
+        assert!(page.contains(r#"name="apple-mobile-web-app-capable" content="yes""#));
+        let (s, m) = get(&app, "/static/manifest.webmanifest").await;
+        assert_eq!(s, StatusCode::OK);
+        let m: serde_json::Value = serde_json::from_str(&m).unwrap();
+        assert_eq!(m["display"], "fullscreen");
+        // No start_url: the app starts on the page it was added from.
+        assert!(m.get("start_url").is_none());
+        for icon in m["icons"].as_array().unwrap() {
+            let src = icon["src"].as_str().unwrap();
+            let r = app
+                .clone()
+                .oneshot(
+                    axum::http::Request::get(format!("/static/{src}"))
+                        .body(axum::body::Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(r.status(), StatusCode::OK, "{src}");
+            assert_eq!(r.headers()[header::CONTENT_TYPE], "image/png");
+            let body = axum::body::to_bytes(r.into_body(), 1 << 20).await.unwrap();
+            assert!(body.starts_with(b"\x89PNG\r\n\x1a\n"), "{src}");
+        }
     }
 
     // rivet: verifies REQ-WARN-006

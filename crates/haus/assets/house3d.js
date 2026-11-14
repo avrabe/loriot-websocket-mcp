@@ -475,7 +475,9 @@ applyValues();
   if (q.has('tour')) {
     const sec = parseInt(q.get('tour'), 10);
     if ([...every.options].some(o => +o.value === sec)) every.value = String(sec);
-    // A wall screen: the panel collapsed, the view free.
+    // A wall screen: the view fills the screen (✕ or Esc brings the page
+    // back) and the panel is collapsed.
+    setMax(true);
     if ($('pbody').style.display !== 'none') $('collapse').click();
     setTour(true);
   }

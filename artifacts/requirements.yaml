@@ -730,3 +730,22 @@ artifacts:
     links:
       - type: traces-to
         target: REQ-UI-006
+
+  - id: REQ-UI-013
+    type: requirement
+    title: Installable on a home screen, full screen on a wall tablet
+    status: implemented
+    release: v0.5.0
+    description: >
+      haus can be added to a phone's or tablet's home screen, where it opens
+      without the browser's bars (on iPad browsers the only way to full
+      screen): a web app manifest (display fullscreen, no start URL, so it
+      starts on the page it was added from) and the Apple web-app tags and
+      icon. house?tour=<s> fills the screen with the house view at once;
+      the close button or Esc brings the page back.
+    fields:
+      priority: should
+      category: functional
+    links:
+      - type: traces-to
+        target: REQ-UI-010
