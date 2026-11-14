@@ -45,23 +45,67 @@ fn check_url(field: &str, u: &str) -> Result<(), String> {
     let shape = (u.starts_with('/') && !u.starts_with("//")) || u.starts_with("https://");
     let clean = !u
         .chars()
-        .any(|c| c.is_whitespace() || c.is_control() || matches!(c, '"' | '\'' | '<' | '>'));
+        .any(|c| c.is_whitespace() || c.is_control() || matches!(c, '"' | '\'' | '<' | '>' | '\\'));
     if shape && clean {
         Ok(())
     } else {
         Err(format!(
-            "{field}: {u:?} must be a path starting with \"/\" (not \"//\") or an https:// URL, without whitespace, quotes, < or >"
+            "{field}: {u:?} must be a path starting with \"/\" (not \"//\") or an https:// URL, without whitespace, quotes, <, > or \\"
         ))
     }
+}
+
+/// JSON types before serde sees the file: serde accepts an array as a
+/// positional struct, and its type errors name a column, not the field.
+fn check_types(v: &serde_json::Value) -> Result<(), String> {
+    use serde_json::Value;
+    fn object<'a>(field: &str, v: &'a Value) -> Result<&'a serde_json::Map<String, Value>, String> {
+        v.as_object()
+            .ok_or_else(|| format!("{field}: must be a JSON object, got {v}"))
+    }
+    fn strings(o: &serde_json::Map<String, Value>, at: &str, keys: &[&str]) -> Result<(), String> {
+        for k in keys {
+            match o.get(*k) {
+                None | Some(Value::String(_)) => {}
+                Some(Value::Null) if *k == "desc" => {}
+                Some(other) => return Err(format!("{at}{k}: must be a string, got {other}")),
+            }
+        }
+        Ok(())
+    }
+    let top = object("nav file", v)?;
+    if let Some(ver) = top.get("version") {
+        if ver.as_u64() != Some(1) {
+            return Err(format!("version: must be the integer 1, got {ver}"));
+        }
+    }
+    if let Some(home) = top.get("home") {
+        strings(object("home", home)?, "home.", &["name", "url"])?;
+    }
+    if let Some(apps) = top.get("apps") {
+        let list = apps
+            .as_array()
+            .ok_or_else(|| format!("apps: must be a JSON array, got {apps}"))?;
+        for (i, a) in list.iter().enumerate() {
+            let at = format!("apps[{i}]");
+            strings(
+                object(&at, a)?,
+                &format!("{at}."),
+                &["id", "name", "url", "desc"],
+            )?;
+        }
+    }
+    Ok(())
 }
 
 /// Parse and check a nav v1 file; `me` is this app's own id. Every error
 /// names the field.
 pub fn parse(json: &str, me: &str) -> Result<Nav, String> {
+    // Types first (serde_json::Value keeps the last of duplicate keys, so the
+    // typed parse below is what refuses duplicates, naming the key).
+    let value: serde_json::Value = serde_json::from_str(json).map_err(|e| e.to_string())?;
+    check_types(&value)?;
     let nav: Nav = serde_json::from_str(json).map_err(|e| e.to_string())?;
-    if nav.version != 1 {
-        return Err(format!("version: must be 1, got {}", nav.version));
-    }
     check_name("home.name", &nav.home.name)?;
     check_url("home.url", &nav.home.url)?;
     if !(1..=20).contains(&nav.apps.len()) {
@@ -363,5 +407,141 @@ mod tests {
         v["apps"][1]["id"] = "a".repeat(32).into();
         v["apps"][1]["desc"] = "d".repeat(120).into();
         check(&v).unwrap();
+    }
+
+    // The nav v1 rules warte added for v1.7.0 (stated by warte's
+    // conformance probe; its refusal cases are not on warte's main yet, so
+    // these are written from the contract text, not mirrored).
+    // rivet: verifies REQ-UI-009
+    #[test]
+    fn contract_additions_of_warte_1_7_are_refused_here() {
+        let h = r#""home": {"name": "h", "url": "/"}"#;
+        let app = r#"{"id": "haus", "name": "haus", "url": "/haus/"}"#;
+        let file = |version: &str, home: &str, apps: &str| {
+            format!(r#"{{"version": {version}, {home}, "apps": [{apps}]}}"#)
+        };
+        let cases: Vec<(&str, String, &str)> = vec![
+            (
+                "backslash path",
+                file(
+                    "1",
+                    h,
+                    r#"{"id": "haus", "name": "haus", "url": "/\\evil.example"}"#,
+                ),
+                "apps[0].url",
+            ),
+            (
+                "backslash https",
+                file(
+                    "1",
+                    h,
+                    r#"{"id": "haus", "name": "haus", "url": "https://a.example\\b"}"#,
+                ),
+                "apps[0].url",
+            ),
+            (
+                "backslash home",
+                file("1", r#""home": {"name": "h", "url": "/\\x"}"#, app),
+                "home.url",
+            ),
+            (
+                "file as array",
+                format!(r#"[1, {{"name": "h", "url": "/"}}, [{app}]]"#),
+                "nav file",
+            ),
+            (
+                "home as array",
+                file("1", r#""home": ["h", "/"]"#, app),
+                "home",
+            ),
+            (
+                "app as array",
+                file("1", h, r#"["haus", "haus", "/haus/"]"#),
+                "apps[0]",
+            ),
+            (
+                "apps as object",
+                format!(r#"{{"version": 1, {h}, "apps": {app}}}"#),
+                "apps",
+            ),
+            ("version 1.0", file("1.0", h, app), "version"),
+            ("version string", file(r#""1""#, h, app), "version"),
+            (
+                "duplicate key",
+                file(
+                    "1",
+                    h,
+                    r#"{"id": "haus", "name": "a", "name": "b", "url": "/"}"#,
+                ),
+                "name",
+            ),
+            (
+                "duplicate top key",
+                format!(r#"{{"version": 1, "version": 1, {h}, "apps": [{app}]}}"#),
+                "version",
+            ),
+            (
+                "name type",
+                file("1", h, r#"{"id": "haus", "name": 5, "url": "/"}"#),
+                "apps[0].name",
+            ),
+            (
+                "home url type",
+                file("1", r#""home": {"name": "h", "url": 1}"#, app),
+                "home.url",
+            ),
+            (
+                "desc type",
+                file(
+                    "1",
+                    h,
+                    r#"{"id": "haus", "name": "haus", "url": "/", "desc": 3}"#,
+                ),
+                "apps[0].desc",
+            ),
+            (
+                "41 code points",
+                file(
+                    "1",
+                    h,
+                    &format!(
+                        r#"{{"id": "haus", "name": "{}", "url": "/"}}"#,
+                        "é".repeat(41)
+                    ),
+                ),
+                "apps[0].name",
+            ),
+        ];
+        for (what, json, field) in cases {
+            let err = parse(&json, "haus").expect_err(what);
+            assert!(err.contains(field), "{what}: {err:?} does not name {field}");
+        }
+        // What the contract allows still passes.
+        let ok = [
+            file(
+                "1",
+                h,
+                r#"{"id": "haus", "name": "haus", "url": "/", "desc": null}"#,
+            ),
+            file(
+                "1",
+                h,
+                &format!(
+                    r#"{{"id": "haus", "name": "{}", "url": "/"}}"#,
+                    "é".repeat(40)
+                ),
+            ),
+            file(
+                "1",
+                h,
+                &format!(
+                    r#"{{"id": "haus", "name": "h", "url": "/", "desc": "{}"}}"#,
+                    "ü".repeat(120)
+                ),
+            ),
+        ];
+        for json in ok {
+            parse(&json, "haus").unwrap();
+        }
     }
 }
