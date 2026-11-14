@@ -570,3 +570,35 @@ artifacts:
         target: REQ-UI-010
       - type: satisfies
         target: REQ-UI-006
+
+  - id: DD-020
+    type: design-decision
+    title: Checks and alarms told apart by kind, short text computed where labels are known
+    status: implemented
+    release: v0.5.0
+    description: >
+      warn::Kind::is_check marks the kinds about a sensor or source; the
+      haus crate words them short for the room cards and the house view.
+    fields:
+      decision: >
+        SensorStuck, SensorSilent, BatteryLow and SourceDown are checks; the
+        rest are alarms. dashboard::short_text words a check as "Check
+        <label>: no change|no data for <span>" or "battery low", with the
+        readable sensor label (else the source name) and the span
+        from since_ms; an alarm keeps its message. /api/house carries both
+        message and short plus check; the status page and /api/warnings are
+        unchanged. A room card is marked only by an alarm; in the house view
+        only alarms come first in the tour, pulse and jump in when new,
+        while checks get a calm chip and an outlined label.
+      rationale: >
+        A stuck or silent sensor is something to look at when convenient,
+        not a problem in the room; worded and styled like an alarm it hides
+        the alarms. The labels live in the haus crate, so the short text is
+        built there rather than in haus-core.
+      alternatives: >
+        A severity field in every Warning (a schema change for all
+        consumers of /api/warnings); shortening the messages themselves (the
+        status page needs the detail).
+    links:
+      - type: satisfies
+        target: REQ-UI-011
