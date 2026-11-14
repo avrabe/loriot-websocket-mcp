@@ -439,7 +439,14 @@ artifacts:
         One file for every app on the host, written by the operator from the
         same list as the landing page; identical checks in both apps mean a
         file works everywhere or nowhere. haus runs warte's 24 refusal cases
-        (tests/nav.rs at pulseengine/warte ec989cb) as its own test.
+        (tests/nav.rs at pulseengine/warte ec989cb) as its own test, plus
+        the rules warte added for v1.7.0: no backslash in any URL ("/\\x"
+        is read as "//x" by browsers), file, home and apps must be JSON
+        objects (serde accepts an array as a positional struct), version is
+        the integer 1, duplicate keys are refused, "desc": null is no
+        description, lengths count code points, a type error names its
+        field. Types are checked on a serde_json::Value before the typed
+        parse, which is the one that refuses duplicate keys.
       alternatives: >
         Links from environment variables per app; a switcher served by the
         reverse proxy (needs response rewriting).
