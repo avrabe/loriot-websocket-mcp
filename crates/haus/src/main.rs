@@ -52,6 +52,9 @@ Environment:
   HAUS_NAV, HAUS_NAV_SELF   optional home link and app switcher: a nav v1
                    JSON file and this app's id in it (both or neither)
   HAUS_HOUSE_MODEL optional house model JSON for the 3D view at /house
+  HAUS_LABELS      optional JSON file {\"<uuid or EUI>/<field>\": \"label\"}: the
+                   sensor's label on the pages (default: its source name
+                   without the room and the quantity)
   BIND             listen address (falls back to HOST, default 0.0.0.0)
   PORT             listen port (default 3000)
   RUST_LOG         log filter (default haus=debug,tower_http=info)";
@@ -311,6 +314,8 @@ async fn run() -> anyhow::Result<()> {
     )
     .map_err(|e| anyhow::anyhow!(e))?;
     house_view::load(std::env::var("HAUS_HOUSE_MODEL").ok().as_deref())
+        .map_err(|e| anyhow::anyhow!(e))?;
+    dashboard::load_labels(std::env::var("HAUS_LABELS").ok().as_deref())
         .map_err(|e| anyhow::anyhow!(e))?;
 
     // Create shared application state

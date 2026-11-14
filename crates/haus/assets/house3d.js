@@ -319,7 +319,7 @@ function showRoom(r) {
   if (v) {
     for (const w of v.warnings) h += `<p class="warn">${esc(w.message)}</p>`;
     if (v.series.length) h += '<table>' + v.series.map(s =>
-      `<tr${s.stale ? ' class="stale"' : ''}><td><a href="sensor/${s.id}">${esc(s.quantity)} · ${esc(s.name)}</a>${s.used || !['Temperature', 'Humidity'].includes(s.quantity) ? '' : ' <span class="dim">(not counted)</span>'}</td>` +
+      `<tr${s.stale ? ' class="stale"' : ''}><td><a href="sensor/${s.id}" title="${esc(s.name)}">${esc(s.label)}</a>${s.used || !['Temperature', 'Humidity'].includes(s.quantity) ? '' : ' <span class="dim">(not counted)</span>'}</td>` +
       `<td class="v">${s.value == null ? '–' : esc(fmt(s.value, 1) + (s.unit ? ' ' + s.unit : ''))}</td></tr>` +
       `<tr><td class="dim" colspan="2">${esc(s.age)}</td></tr>`).join('') + '</table>';
     else h += '<p class="dim">No live sensor in this room.</p>';

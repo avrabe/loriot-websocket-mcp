@@ -24,6 +24,7 @@ pub mod heatpump;
 pub mod house;
 pub mod import;
 pub mod ingest;
+pub mod label;
 pub mod loxone;
 pub mod nav;
 pub mod sensors;

@@ -615,11 +615,14 @@ async fn session(state: &AppState, cfg: &LoxoneConfig) -> Result<(), BoxError> {
         tracing::warn!("{hint}");
     }
 
-    c.request(&Cmd::EnableStatusUpdates, None).await?;
-    c.setup_deadline = None;
+    // Connected before the first value can arrive: value events may come in
+    // while the request below waits for its answer, and are stored then. A
+    // failed request ends the session, which sets it back to false.
     if let Some(h) = state.sources.loxone.as_ref() {
         h.set_connected(true);
     }
+    c.request(&Cmd::EnableStatusUpdates, None).await?;
+    c.setup_deadline = None;
 
     let mut keepalive = tokio::time::interval(cfg.keepalive);
     keepalive.tick().await;

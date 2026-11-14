@@ -107,11 +107,32 @@ fn value(v: f64, unit: &str) -> String {
 /// sensors); the status page still lists them.
 pub const OVERVIEW_MAX_AGE_MS: i64 = 30 * 86_400_000;
 
-/// "Temperature · Kitchen sensor", plus the field when a sensor has several.
-fn what(m: &SeriesMeta, room: &str) -> String {
+static LABELS: std::sync::OnceLock<haus_core::label::Labels> = std::sync::OnceLock::new();
+
+/// Read and check `HAUS_LABELS` (per-series labels) once at startup.
+pub fn load_labels(path: Option<&str>) -> Result<(), String> {
+    let Some(p) = path else { return Ok(()) };
+    let json = std::fs::read_to_string(p).map_err(|e| format!("HAUS_LABELS {p}: {e}"))?;
+    let l = haus_core::label::Labels::parse(&json).map_err(|e| format!("HAUS_LABELS {p}: {e}"))?;
+    let _ = LABELS.set(l);
+    Ok(())
+}
+
+/// The sensor part of a label: the operator's label, else what the source
+/// name says beyond the room and the quantity (REQ-UI-007).
+pub(crate) fn sensor_label(m: &SeriesMeta, room: &str) -> Option<String> {
+    LABELS
+        .get()
+        .and_then(|l| l.get(&m.key))
+        .map(str::to_string)
+        .or_else(|| haus_core::label::short(&m.name, Some(room), m.quantity))
+}
+
+/// "Temperature · Spiegel", plus the field when a sensor has several.
+pub(crate) fn what(m: &SeriesMeta, room: &str) -> String {
     let mut w = label(m.quantity).to_string();
-    if m.name != room {
-        w = format!("{w} · {}", m.name);
+    if let Some(s) = sensor_label(m, room) {
+        w = format!("{w} · {s}");
     }
     let f = m.key.field.as_str();
     if m.key.source == Source::Loxone && f != "Default" {
@@ -803,6 +824,58 @@ mod tests {
         ]
     }
 
+    // rivet: verifies REQ-UI-007
+    // rivet: verifies DD-018
+    #[test]
+    fn labels_drop_the_room_and_quantity_and_the_operator_file_wins() {
+        let m = |id: u32, name: &str, room: &str| {
+            view(
+                id,
+                Source::Loxone,
+                Quantity::Temperature,
+                name,
+                Some(room),
+                Some(MIN),
+                20.0,
+            )
+            .meta
+        };
+        assert_eq!(
+            what(&m(900, "Temperatur Küche", "Küche"), "Küche"),
+            "Temperature (f)"
+        );
+        assert_eq!(
+            what(&m(901, "Touch Gästebad Spiegel", "Gästebad"), "Gästebad"),
+            "Temperature · Touch Spiegel (f)"
+        );
+        // A LoRaWAN sensor is its own room: only the quantity.
+        let lora = view(
+            902,
+            Source::Loriot,
+            Quantity::Humidity,
+            "Cellar",
+            None,
+            Some(MIN),
+            50.0,
+        )
+        .meta;
+        assert_eq!(what(&lora, room_of(&lora)), "Humidity");
+        // The operator's label replaces the derived one (keys used only here,
+        // as LABELS is set once per process).
+        let _ = LABELS.set(haus_core::label::Labels::parse(r#"{"s903/f": "Fenster"}"#).unwrap());
+        assert_eq!(
+            what(&m(903, "Temperatur Küche", "Küche"), "Küche"),
+            "Temperature · Fenster (f)"
+        );
+        assert_eq!(
+            what(&m(904, "Temperatur Küche", "Küche"), "Küche"),
+            "Temperature (f)"
+        );
+        // An unreadable file stops startup naming the setting.
+        let e = load_labels(Some("/nonexistent/labels.json")).unwrap_err();
+        assert!(e.starts_with("HAUS_LABELS /nonexistent/labels.json"), "{e}");
+    }
+
     // rivet: verifies REQ-UI-001
     // rivet: verifies DD-002
     #[test]
@@ -840,8 +913,8 @@ mod tests {
         let mut old = sample();
         old[1].latest = Some((NOW - OVERVIEW_MAX_AGE_MS - 1, 5.0));
         assert!(!render_overview(&old, live, NOW, &[]).contains("sensor/1\""));
-        // Names are escaped.
-        assert!(html.contains("Valve &lt;b&gt;") && !html.contains("Valve <b>"));
+        // Names are escaped ("Valve" is dropped from a valve's label).
+        assert!(html.contains("Valve · &lt;b&gt;") && !html.contains("<b>"));
         // The overview refreshes itself.
         assert!(html.contains(r#"hx-get="partials/overview""#));
 
