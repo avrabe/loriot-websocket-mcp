@@ -94,7 +94,16 @@ nav.apps a[aria-current="page"] { color: inherit; font-weight: 600; }
 .house3d .lbl.warned { background: #b91c1c; color: #fff; }
 .house3d .lbl.warned span { color: #fff; }
 .house3d .lbl.current { outline: 2px solid var(--text); font-size: 13px; }
-.house3d.touring #info { width: min(420px, calc(100% - 20px)); font-size: 1.1rem; }
+.house3d.touring #info { width: min(420px, calc(100% - 20px)); font-size: 1.05rem; }
 .house3d.touring #info .warn { font-weight: 700; font-size: 1.15rem; }
 .house3d #tour[aria-pressed=true] { background: var(--text); color: var(--bg); }
-@media (max-width: 700px) { .house3d #alerts { max-width: calc(100% - 20px); top: auto; bottom: 10px; left: 10px; justify-content: flex-start; } }
+@media (max-width: 700px) { .house3d #alerts { max-width: calc(100% - 20px); top: 62px; left: 10px; right: auto; justify-content: flex-start; } }
+.house3d #info .sum { font-family: var(--mono); margin: 2px 0; }
+.house3d #info details summary { cursor: pointer; color: var(--dim); font-size: .8rem; margin-top: 4px; }
+/* Small screens: the info box spans the bottom and stays short; the camera
+   keeps the room above it. */
+@media (max-width: 700px), (max-height: 600px) {
+  .house3d #info { left: 10px; right: 10px; width: auto; max-height: 38%; font-size: .8rem; }
+  .house3d.touring #info { width: auto; font-size: .9rem; }
+  .house3d.touring #info .warn { font-size: .95rem; }
+}
