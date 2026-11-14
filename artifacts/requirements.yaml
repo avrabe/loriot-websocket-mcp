@@ -68,13 +68,23 @@ artifacts:
   - id: REQ-RES-001
     type: requirement
     title: Resource budget on a Raspberry Pi 4 class host
-    status: approved
+    status: implemented
     release: v0.4.0
     description: >
       With about 10M stored points, haus stays under 512 MB of memory on a
       Raspberry Pi 4 class host, and a 90-day chart page renders in under 1 s
       there. Measured on that hardware, not on a laptop.
     fields:
+      evidence: >
+        On the deployment host (Raspberry Pi 4 class), 2026-11-13/14. Store:
+        8,363,292 points in 62 series (LoRaWAN 302,365, Loxone 8,060,927;
+        2025-01-03 to 2026-11-14), counted on a copy of that store by two
+        methods that agreed. 0.4.0-rc.7 ran 25 h without restart: peak RSS
+        (VmHWM) 75.1 MiB, RSS 41.7 MiB at the end. 0.4.0-rc.8 on the same
+        store: 15 requests for 90-day sensor pages (whole page, chart drawn
+        on the server) took 0.031 to 0.163 s through the reverse proxy,
+        timed from the LAN. The store holds 8.4M points, not 10M; memory is
+        at 15 % of the budget and the slowest page at 16 % of its limit.
       priority: must
       category: non-functional
     links:
@@ -142,7 +152,7 @@ artifacts:
   - id: REQ-LOX-001
     type: requirement
     title: Live Loxone values from the Miniserver websocket
-    status: implemented
+    status: verified
     release: v0.4.0
     description: >
       haus connects to the Miniserver's websocket with token authentication,
@@ -157,6 +167,13 @@ artifacts:
       the deployment against the real Miniserver (startup log line
       "N of M series mapped", /health), so this stays implemented until then.
     fields:
+      evidence: >
+        0.4.0-rc.7 and rc.8 on the deployment against the real
+        Miniserver, 2026-11-13/14: startup logs "Loxone: 38 of 47 series
+        mapped to states, 9 retired" (none unmapped); /health reports the
+        Loxone source connected with values seconds old; the warnings rules
+        run on the live Loxone series (4 stuck sensors and 2 cold rooms
+        found and confirmed by the operator).
       priority: must
       category: functional
     links:
@@ -293,7 +310,7 @@ artifacts:
   - id: REQ-UI-008
     type: requirement
     title: Served under a path prefix behind a reverse proxy
-    status: implemented
+    status: verified
     release: v0.4.0
     description: >
       With HAUS_BASE_PATH set (e.g. /haus), every page, partial, static file,
@@ -302,6 +319,12 @@ artifacts:
       prefix kept. /health also stays at the root. Without the setting
       nothing moves. A malformed prefix stops startup.
     fields:
+      evidence: >
+        0.4.0-rc.8 on the deployment behind its reverse proxy with
+        HAUS_BASE_PATH=/haus, 2026-11-14: the overview, status, sensor pages,
+        /haus/api/* and /haus/health answer under the prefix; the proxy
+        forwards /haus/* with the prefix kept, and /api/* outside it is not
+        haus's.
       priority: must
       category: functional
     links:
@@ -311,7 +334,7 @@ artifacts:
   - id: REQ-UI-009
     type: requirement
     title: Home link and app switcher (nav v1)
-    status: implemented
+    status: verified
     release: v0.4.0
     description: >
       With HAUS_NAV (a nav v1 JSON file, the contract shared with warte:
@@ -322,6 +345,13 @@ artifacts:
       that breaks the contract, or only one of the two settings, stops
       startup naming the field. Unset, pages are unchanged.
     fields:
+      evidence: >
+        0.4.0-rc.8 on the deployment with the host's nav v1 file,
+        2026-11-14, checked through the reverse proxy: the haus page shows
+        5 app links (home, warte, haus, photos, login) in file order with
+        aria-current only on haus; warte 1.6.25 on the same file shows the
+        same 5 links in the same order with aria-current on warte. A broken
+        copy of the file stopped both apps at startup naming apps[2].url.
       priority: should
       category: functional
     links:
@@ -332,13 +362,25 @@ artifacts:
   - id: REQ-DEPLOY-001
     type: requirement
     title: A signed linux-arm64 release that deployment tooling can verify
-    status: approved
+    status: implemented
     release: v0.4.0
     description: >
       Tags build static binaries with SHA256SUMS.txt signed by cosign (keyless,
       release workflow identity) and an SBOM, as for 0.3.0, so deployment
       tooling can verify the release and pin the binary's sha256.
     fields:
+      evidence: >
+        The deployment tooling verifies each release before pinning it, by a
+        fetch step that downloads the binary, SHA256SUMS.txt and its cosign
+        bundle and runs cosign verify-blob (workflow identity, GitHub OIDC
+        issuer), sha256 -c, and gh attestation verify, stopping on any
+        failure; only then is the linux-arm64 sha256 pinned. The install
+        step accepts only a binary with the pinned sha256, checked on the
+        controller and again on the host. Re-run on 0.4.0-rc.8, 2026-11-14:
+        cosign "Verified OK", the binary's checksum OK, attestation verify
+        exit 0; the pinned sha256 equals the SHA256SUMS.txt entry and the
+        installed binary. The signature check binds to the install through
+        the pin: the install step itself does not run cosign.
       priority: must
       category: constraint
 
