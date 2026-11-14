@@ -14,9 +14,9 @@ use futures::{SinkExt, StreamExt};
 use haus_core::import::loxone_quantity;
 use haus_core::ingest::Item;
 use haus_core::loxone::{
-    describe_control, hmac_hex, parse_value_events, password_hash, public_key_sha256,
-    resolve_states, Cmd, HashAlg, Header, LoxUuid, MsgKind, Response, Secret, Session,
-    LOXONE_EPOCH_UNIX_S,
+    describe_control, hmac_hex, parse_value_events, parse_weather_events, password_hash,
+    public_key_sha256, resolve_states, weather_server, Cmd, HashAlg, Header, LoxUuid, MsgKind,
+    Response, Secret, Session, LOXONE_EPOCH_UNIX_S,
 };
 use haus_core::store::{SeriesKey, SeriesMeta, Source};
 use std::collections::HashMap;
@@ -596,6 +596,16 @@ async fn session(state: &AppState, cfg: &LoxoneConfig) -> Result<(), BoxError> {
     };
     let wanted: Vec<(String, String)> = wanted_meta.keys().cloned().collect();
     let res = resolve_states(&structure, &wanted, &cfg.overrides);
+    // The Loxone Weather Service, when the Miniserver has one: its "actual"
+    // state carries the current weather for the house view (REQ-UI-012).
+    let weather = weather_server(&structure);
+    match &weather {
+        Some(w) => tracing::info!(
+            "Loxone: weather service found ({} weather types)",
+            w.type_texts.len()
+        ),
+        None => tracing::info!("Loxone: no weather service in the structure file"),
+    }
     tracing::info!(
         "Loxone: {} of {} series mapped to states, {} retired",
         res.states.values().map(Vec::len).sum::<usize>(),
@@ -667,6 +677,28 @@ async fn session(state: &AppState, cfg: &LoxoneConfig) -> Result<(), BoxError> {
                         }
                     }
                 }
+                Msg::Binary(MsgKind::WeatherEvents, b) => {
+                    c.last_rx = tokio::time::Instant::now();
+                    if let Some(w) = &weather {
+                        match parse_weather_events(&b) {
+                            Ok(tables) => {
+                                // The actual state's first entry is the weather now.
+                                for t in tables.iter().filter(|t| t.uuid == w.actual) {
+                                    if let Some(e) = t.entries.first() {
+                                        let text =
+                                            w.type_texts.get(&e.weather_type).map(String::as_str);
+                                        crate::weather::store_loxone(
+                                            e,
+                                            text,
+                                            crate::dashboard::now_ms(),
+                                        );
+                                    }
+                                }
+                            }
+                            Err(e) => tracing::warn!("Loxone: weather table: {e}"),
+                        }
+                    }
+                }
                 Msg::Keepalive | Msg::Binary(..) => {}
             },
             _ = keepalive.tick() => c.send(&Cmd::Keepalive, None).await?,
@@ -691,7 +723,9 @@ mod tests {
     use super::*;
     use crate::state::{tests::test_state, Sources, UpstreamHealth};
     use base64::Engine as _;
-    use haus_core::loxone::{encode_value_events, ALLOWED_COMMANDS};
+    use haus_core::loxone::{
+        encode_value_events, encode_weather_events, WeatherEntry, WeatherTable, ALLOWED_COMMANDS,
+    };
     use haus_core::store::{Quantity, SeriesKey};
     use haus_core::AppConfig;
     use rsa::pkcs8::EncodePublicKey;
@@ -708,6 +742,7 @@ mod tests {
     const CTRL_STATE: &str = "13f00a65-01a9-8a08-ffff196db5c1dff4";
     const ROOM: &str = "1d000000-0000-0001-ffff000000000001";
     const ROOM_TARGET: &str = "1d000000-0000-0001-ffff000000000003";
+    const WEATHER_ACTUAL: &str = "1d000000-0000-0002-ffff000000000001";
     const UNKNOWN: &str = "0e000000-0000-0000-0000000000000099";
     /// A sensor with no imported history, followed through LOXONE_TRACK.
     const TRACKED: &str = "1e000000-0000-0002-ffff000000000001";
@@ -785,7 +820,10 @@ mod tests {
             ROOM: {"type": "IRoomControllerV2", "uuidAction": ROOM,
                    "states": {"tempActual": "1d000000-0000-0001-ffff000000000002",
                               "tempTarget": ROOM_TARGET}}
-        }})
+        },
+            "weatherServer": {"states": {"actual": WEATHER_ACTUAL,
+                                         "forecast": "1d000000-0000-0002-ffff000000000002"},
+                              "weatherTypeTexts": {"1": "wolkenlos", "7": "leichter Regen"}}})
     }
 
     type ServerWs = WebSocketStream<TcpStream>;
@@ -981,6 +1019,30 @@ mod tests {
                     .await
                     .unwrap();
                     ws.send(Message::Binary(ev.into())).await.unwrap();
+                    // The weather service's current weather (identifier 7).
+                    let w = encode_weather_events(&[WeatherTable {
+                        uuid: LoxUuid::parse(WEATHER_ACTUAL).unwrap(),
+                        last_update: 563_000_000,
+                        entries: vec![WeatherEntry {
+                            timestamp: 563_000_000,
+                            weather_type: 7,
+                            wind_direction: 250,
+                            solar_radiation: 40,
+                            relative_humidity: 88,
+                            temperature: 6.4,
+                            perceived_temperature: 3.9,
+                            dew_point: 4.6,
+                            precipitation: 0.6,
+                            wind_speed: 18.5,
+                            barometric_pressure: 1012.0,
+                        }],
+                    }]);
+                    ws.send(Message::Binary(
+                        Header::encode(7, w.len() as u32).to_vec().into(),
+                    ))
+                    .await
+                    .unwrap();
+                    ws.send(Message::Binary(w.into())).await.unwrap();
                     match fake.after {
                         After::Drop => return,
                         After::Silent => silent = true,
@@ -1135,6 +1197,16 @@ mod tests {
         })
         .await;
         assert!(st.sources.loxone.as_ref().unwrap().connected());
+        // The weather service's current weather is kept for the house view
+        // (REQ-UI-012): its type text, a code for drawing it, wind from 250°.
+        wait_for("the weather", || {
+            crate::weather::current_for_tests().is_some()
+        })
+        .await;
+        let w = crate::weather::current_for_tests().unwrap();
+        assert_eq!((w.temperature_2m, w.wind_speed_10m), (6.4, 18.5));
+        assert_eq!(w.text.as_deref(), Some("leichter Regen"));
+        assert_eq!((w.weather_code, w.wind_direction_10m), (61, Some(250.0)));
         // The unknown state created no series.
         assert_eq!(st.ingest.store().series().unwrap().len(), 2);
         // Keepalives flow.

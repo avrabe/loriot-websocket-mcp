@@ -610,8 +610,9 @@ artifacts:
     release: v0.5.0
     description: >
       crates/haus/assets/idle.js is warte's templates/idle.js at eb27b67
-      (Apache-2.0, same author) with four marked changes; the weather comes
-      from a small server-side Open-Meteo client.
+      (Apache-2.0, same author) with marked changes; the weather comes from
+      the Miniserver's weather service, else a small server-side Open-Meteo
+      client.
     fields:
       decision: >
         The script is taken over, not rewritten, so the two apps' scenes stay
@@ -663,3 +664,42 @@ artifacts:
     links:
       - type: satisfies
         target: REQ-UI-013
+
+  - id: DD-023
+    type: design-decision
+    title: Weather from the Loxone Weather Service, drawn in the scene in the browser
+    status: implemented
+    release: v0.5.0
+    description: >
+      haus reads the weather service's binary weather tables on its existing
+      Miniserver websocket; the 3D view draws sun, sky and precipitation
+      from /api/weather with three.js only.
+    fields:
+      decision: >
+        haus_core::loxone parses weather-state tables (identifier 7) as
+        "Communicating with the Loxone Miniserver" (Config 10.0) lays them
+        out: uuid, lastUpdate u32, nrEntries i32, 68-byte entries of five
+        i32 and six f64, little endian; weather_server reads the structure
+        file's weatherServer (actual, forecast, weatherTypeTexts). The
+        session keeps the actual state's first entry as the current weather,
+        with the type's text; wmo_from turns the text (German or English)
+        into a WMO code so both sources draw alike. /api/weather prefers the
+        Miniserver's answer while under 3 h old. The browser computes the
+        sun's azimuth and elevation (place from the scene's settings, else
+        the time zone's city), turns them by the model's north_deg, and sets
+        the sun light, its colour and the background from it; rain is line
+        segments, snow points, in a box around the buildings, moved each
+        frame by gravity and the wind.
+      rationale: >
+        The owner's Miniserver has the weather service, and the owner prefers
+        it to an outside request with coordinates. Drawing in the browser
+        keeps the server's work to one small JSON answer.
+      alternatives: >
+        Open-Meteo only (an outside request and a place to configure); a
+        weather station (none is installed); shadows (too heavy for a wall
+        tablet).
+    links:
+      - type: satisfies
+        target: REQ-UI-014
+      - type: satisfies
+        target: REQ-UI-012

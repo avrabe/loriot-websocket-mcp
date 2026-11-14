@@ -224,7 +224,8 @@
     fetch(u).then(function (r) { return r.ok ? r.json() : null; }).then(function (j) {
       if (!j || !j.current) return;
       var c = wmo(j.current.weather_code | 0);
-      weather = { temp: Math.round(j.current.temperature_2m), text: c.text, fx: c.fx,
+      // haus: the source's own words when it has them (the Miniserver's).
+      weather = { temp: Math.round(j.current.temperature_2m), text: j.current.text || c.text, fx: c.fx,
         wind: Math.round(j.current.wind_speed_10m || 0) };
       if (showing) { caption(); layers(); }
     }).catch(function () {});

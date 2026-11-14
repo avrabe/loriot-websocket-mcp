@@ -168,6 +168,164 @@ pub fn encode_value_events(events: &[(LoxUuid, f64)]) -> Vec<u8> {
     out
 }
 
+/// One entry of a weather-state event table, as "Communicating with the
+/// Loxone Miniserver" (Config 10.0) lays it out: five 32-bit integers, six
+/// 64-bit floats, little endian, 68 bytes.
+#[derive(Clone, Debug, PartialEq)]
+pub struct WeatherEntry {
+    /// Seconds since 2009-01-01.
+    pub timestamp: i32,
+    /// An index into the structure file's weatherServer.weatherTypeTexts.
+    pub weather_type: i32,
+    /// Degrees.
+    pub wind_direction: i32,
+    pub solar_radiation: i32,
+    pub relative_humidity: i32,
+    /// °C.
+    pub temperature: f64,
+    pub perceived_temperature: f64,
+    pub dew_point: f64,
+    /// mm.
+    pub precipitation: f64,
+    /// km/h.
+    pub wind_speed: f64,
+    pub barometric_pressure: f64,
+}
+
+/// A weather-state event table: the state's uuid, when the weather was last
+/// updated (seconds since 2009, UTC) and its entries.
+#[derive(Clone, Debug, PartialEq)]
+pub struct WeatherTable {
+    pub uuid: LoxUuid,
+    pub last_update: u32,
+    pub entries: Vec<WeatherEntry>,
+}
+
+const WEATHER_ENTRY: usize = 68;
+
+/// Parse the weather-state tables of one message (identifier 7); there may
+/// be several back to back.
+pub fn parse_weather_events(b: &[u8]) -> Result<Vec<WeatherTable>, LoxError> {
+    let mut out = Vec::new();
+    let mut at = 0;
+    let i32_at = |o: usize| i32::from_le_bytes(b[o..o + 4].try_into().expect("4 bytes"));
+    let f64_at = |o: usize| f64::from_le_bytes(b[o..o + 8].try_into().expect("8 bytes"));
+    while at < b.len() {
+        if b.len() - at < 24 {
+            return Err(proto(format!("weather table header cut at byte {at}")));
+        }
+        let uuid = LoxUuid::from_le_bytes(&b[at..at + 16])?;
+        let last_update = u32::from_le_bytes(b[at + 16..at + 20].try_into().expect("4 bytes"));
+        let n = i32_at(at + 20);
+        let n = usize::try_from(n).map_err(|_| proto(format!("weather table with {n} entries")))?;
+        at += 24;
+        if b.len() - at < n * WEATHER_ENTRY {
+            return Err(proto(format!(
+                "weather table of {n} entries needs {} bytes, {} left",
+                n * WEATHER_ENTRY,
+                b.len() - at
+            )));
+        }
+        let entries = (0..n)
+            .map(|k| {
+                let o = at + k * WEATHER_ENTRY;
+                WeatherEntry {
+                    timestamp: i32_at(o),
+                    weather_type: i32_at(o + 4),
+                    wind_direction: i32_at(o + 8),
+                    solar_radiation: i32_at(o + 12),
+                    relative_humidity: i32_at(o + 16),
+                    temperature: f64_at(o + 20),
+                    perceived_temperature: f64_at(o + 28),
+                    dew_point: f64_at(o + 36),
+                    precipitation: f64_at(o + 44),
+                    wind_speed: f64_at(o + 52),
+                    barometric_pressure: f64_at(o + 60),
+                }
+            })
+            .collect();
+        at += n * WEATHER_ENTRY;
+        out.push(WeatherTable {
+            uuid,
+            last_update,
+            entries,
+        });
+    }
+    Ok(out)
+}
+
+/// Encode weather-state tables (tests, fake Miniserver).
+pub fn encode_weather_events(tables: &[WeatherTable]) -> Vec<u8> {
+    let mut out = Vec::new();
+    for t in tables {
+        out.extend_from_slice(&t.uuid.0);
+        out.extend_from_slice(&t.last_update.to_le_bytes());
+        out.extend_from_slice(&(t.entries.len() as i32).to_le_bytes());
+        for e in &t.entries {
+            for i in [
+                e.timestamp,
+                e.weather_type,
+                e.wind_direction,
+                e.solar_radiation,
+                e.relative_humidity,
+            ] {
+                out.extend_from_slice(&i.to_le_bytes());
+            }
+            for f in [
+                e.temperature,
+                e.perceived_temperature,
+                e.dew_point,
+                e.precipitation,
+                e.wind_speed,
+                e.barometric_pressure,
+            ] {
+                out.extend_from_slice(&f.to_le_bytes());
+            }
+        }
+    }
+    out
+}
+
+/// The structure file's weatherServer (the Loxone Weather Service): the
+/// states that carry the current weather and the forecast, and the texts
+/// of the weather types.
+#[derive(Clone, Debug, PartialEq)]
+pub struct WeatherServer {
+    pub actual: LoxUuid,
+    pub forecast: Option<LoxUuid>,
+    pub type_texts: HashMap<i32, String>,
+}
+
+/// None when the Miniserver has no weather service (or no actual state).
+pub fn weather_server(structure: &Value) -> Option<WeatherServer> {
+    let w = &structure["weatherServer"];
+    let state = |k: &str| w["states"][k].as_str().and_then(|s| LoxUuid::parse(s).ok());
+    let actual = state("actual")?;
+    let mut type_texts = HashMap::new();
+    match &w["weatherTypeTexts"] {
+        Value::Object(m) => {
+            for (k, v) in m {
+                if let (Ok(k), Some(v)) = (k.parse::<i32>(), v.as_str()) {
+                    type_texts.insert(k, v.to_string());
+                }
+            }
+        }
+        Value::Array(a) => {
+            for (i, v) in a.iter().enumerate() {
+                if let Some(v) = v.as_str() {
+                    type_texts.insert(i as i32, v.to_string());
+                }
+            }
+        }
+        _ => {}
+    }
+    Some(WeatherServer {
+        actual,
+        forecast: state("forecast"),
+        type_texts,
+    })
+}
+
 /// A text response `{"LL": {"control", "value", "Code"}}`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Response {
@@ -643,6 +801,79 @@ pub fn resolve_states(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // The weather-state table as the protocol document lays it out, built
+    // byte by byte here (not with the encoder): uuid, lastUpdate u32,
+    // nrEntries i32, then 68-byte entries of 5 i32 and 6 f64, little endian.
+    // rivet: verifies REQ-UI-012
+    #[test]
+    fn weather_tables_are_read_as_the_protocol_document_lays_them_out() {
+        let u = LoxUuid::parse("0b1e2c3d-0001-0002-0102030405060708").unwrap();
+        let mut b = u.0.to_vec();
+        b.extend_from_slice(&563_000_000u32.to_le_bytes());
+        b.extend_from_slice(&1i32.to_le_bytes());
+        for i in [563_000_100i32, 7, 250, 120, 81] {
+            b.extend_from_slice(&i.to_le_bytes());
+        }
+        for f in [6.4f64, 3.9, 3.3, 0.6, 18.5, 1012.0] {
+            b.extend_from_slice(&f.to_le_bytes());
+        }
+        assert_eq!(b.len(), 24 + 68);
+        let t = parse_weather_events(&b).unwrap();
+        assert_eq!(t.len(), 1);
+        assert_eq!((t[0].uuid, t[0].last_update), (u, 563_000_000));
+        let e = &t[0].entries[0];
+        assert_eq!(
+            (
+                e.timestamp,
+                e.weather_type,
+                e.wind_direction,
+                e.solar_radiation,
+                e.relative_humidity
+            ),
+            (563_000_100, 7, 250, 120, 81)
+        );
+        assert_eq!(
+            (e.temperature, e.perceived_temperature, e.dew_point),
+            (6.4, 3.9, 3.3)
+        );
+        assert_eq!(
+            (e.precipitation, e.wind_speed, e.barometric_pressure),
+            (0.6, 18.5, 1012.0)
+        );
+        // Two tables back to back, and the encoder writes the same bytes.
+        let mut two = b.clone();
+        two.extend_from_slice(&b);
+        let t2 = parse_weather_events(&two).unwrap();
+        assert_eq!(t2.len(), 2);
+        assert_eq!(encode_weather_events(&t), b);
+        // Cut short: refused, not read past the end.
+        assert!(parse_weather_events(&b[..b.len() - 1]).is_err());
+        assert!(parse_weather_events(&b[..20]).is_err());
+        let mut neg = b.clone();
+        neg[20..24].copy_from_slice(&(-1i32).to_le_bytes());
+        assert!(parse_weather_events(&neg).is_err());
+    }
+
+    // rivet: verifies REQ-UI-012
+    #[test]
+    fn the_weather_service_is_found_in_the_structure_file() {
+        let s: Value = serde_json::from_str(
+            r#"{"weatherServer": {"states": {"actual": "0b1e2c3d-0001-0002-0102030405060708",
+                "forecast": "0b1e2c3d-0001-0002-0102030405060709"},
+                "weatherTypeTexts": {"1": "wolkenlos", "16": "Nebel", "x": "skip"}}}"#,
+        )
+        .unwrap();
+        let w = weather_server(&s).unwrap();
+        assert_eq!(
+            w.actual,
+            LoxUuid::parse("0b1e2c3d-0001-0002-0102030405060708").unwrap()
+        );
+        assert!(w.forecast.is_some());
+        assert_eq!(w.type_texts.get(&16).map(String::as_str), Some("Nebel"));
+        assert_eq!(w.type_texts.len(), 2);
+        assert!(weather_server(&serde_json::json!({"controls": {}})).is_none());
+    }
     use serde_json::json;
 
     #[test]
