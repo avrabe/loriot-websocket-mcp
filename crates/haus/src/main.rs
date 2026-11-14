@@ -11,6 +11,7 @@ mod import_cmd;
 mod loxone;
 mod sse;
 mod state;
+mod weather;
 mod websocket;
 
 use axum::{extract::State, routing::get, Json, Router};
@@ -52,6 +53,9 @@ Environment:
   HAUS_NAV, HAUS_NAV_SELF   optional home link and app switcher: a nav v1
                    JSON file and this app's id in it (both or neither)
   HAUS_HOUSE_MODEL optional house model JSON for the 3D view at /house
+  HAUS_WEATHER_AT  optional \"<lat>,<lon>\": haus asks Open-Meteo every 30 min
+                   for the weather there (rounded to 0.1 degree) for the house
+                   view's idle scene; browsers never call Open-Meteo themselves
   HAUS_LABELS      optional JSON file {\"<uuid or EUI>/<field>\": \"label\"}: the
                    sensor's label on the pages (default: its source name
                    without the room and the quantity)
@@ -315,6 +319,8 @@ async fn run() -> anyhow::Result<()> {
     .map_err(|e| anyhow::anyhow!(e))?;
     house_view::load(std::env::var("HAUS_HOUSE_MODEL").ok().as_deref())
         .map_err(|e| anyhow::anyhow!(e))?;
+    weather::load(std::env::var("HAUS_WEATHER_AT").ok().as_deref())
+        .map_err(|e| anyhow::anyhow!(e))?;
     dashboard::load_labels(std::env::var("HAUS_LABELS").ok().as_deref())
         .map_err(|e| anyhow::anyhow!(e))?;
 
@@ -341,6 +347,7 @@ async fn run() -> anyhow::Result<()> {
         .route("/api/warnings", get(dashboard::warnings_api))
         .route("/house", get(house_view::house_page))
         .route("/api/house", get(house_view::house_api))
+        .route("/api/weather", get(weather::weather_api))
         .route("/static/{name}", get(dashboard::static_file))
         // SSE routes
         .route("/sse/readings", get(sse::readings_stream))
@@ -363,6 +370,15 @@ async fn run() -> anyhow::Result<()> {
     tokio::spawn(async move {
         websocket::run_loriot_connection(ws_state).await;
     });
+
+    if let Some(p) = weather::place() {
+        tracing::info!(
+            "Weather: Open-Meteo for {:.1},{:.1} every 30 min",
+            p.lat,
+            p.lon
+        );
+        tokio::spawn(weather::run(p));
+    }
 
     if let Some(cfg) = loxone {
         let lox_state = state.clone();

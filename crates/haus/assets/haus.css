@@ -114,3 +114,21 @@ html.house-max, html.house-max body { overflow: hidden; }
   .house3d.touring #info { width: auto; font-size: .9rem; }
   .house3d.touring #info .warn { font-size: .95rem; }
 }
+/* The idle scene over the house view (REQ-UI-012), after warte's: a
+   translucent layer; the house stays readable underneath. */
+.house3d #idle-scene { position: absolute; inset: 0; z-index: 5; pointer-events: none; opacity: 0; transition: opacity 1.2s ease; }
+.house3d.idle-on #idle-scene { opacity: .85; }
+.house3d #idle-caption {
+  position: absolute; left: 50%; top: 14px; transform: translate(-50%, -12px);
+  z-index: 6; pointer-events: none; opacity: 0; transition: opacity 1.2s ease, transform 1.2s ease;
+  width: min(560px, calc(100% - 32px)); box-sizing: border-box;
+  display: flex; flex-direction: column; gap: 4px; padding: 12px 16px;
+  background: rgba(7, 11, 18, .62); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  border: 1px solid color-mix(in srgb, var(--idle-tint, #3ee6ff) 45%, transparent);
+  border-radius: 12px; color: #e8eef6; font-size: 14px; line-height: 1.45;
+  box-shadow: 0 0 40px color-mix(in srgb, var(--idle-tint, #3ee6ff) 18%, transparent);
+}
+.house3d.idle-on #idle-caption { opacity: 1; transform: translate(-50%, 0); }
+.house3d #idle-caption .idle-title { font-size: 18px; color: var(--idle-tint, #3ee6ff); letter-spacing: .02em; }
+.house3d #idle-caption small { color: #93a1b3; font-size: 12px; margin-top: 2px; }
+@media (prefers-reduced-motion: reduce) { .house3d #idle-scene, .house3d #idle-caption { transition: none; } }
