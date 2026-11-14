@@ -260,6 +260,18 @@ pub struct Climate {
     pub rh: Option<f64>,
     /// The series the values come from.
     pub used: Vec<u32>,
+    /// air_c comes from floor probes: the room has no air sensor
+    /// (owner, 2026-11-14: a floor probe close to the room's air is better
+    /// than no value).
+    pub floor: bool,
+}
+
+/// A floor-heating probe, by its name: the fallback when a room has no air
+/// sensor. Radiators and valve actuators never stand in for the air.
+const FLOOR_PROBE: [&str; 4] = ["Fußboden", "Fussboden", "FBH", "Floor"];
+
+fn is_floor_probe(m: &SeriesMeta) -> bool {
+    m.quantity == Quantity::Temperature && FLOOR_PROBE.iter().any(|p| m.name.contains(p))
 }
 
 pub fn climate(series: &[&SeriesData], now_ms: i64, cfg: &WarnConfig) -> Climate {
@@ -285,9 +297,21 @@ pub fn climate(series: &[&SeriesData], now_ms: i64, cfg: &WarnConfig) -> Climate
         .copied()
         .filter(|s| s.meta.quantity == Quantity::Humidity)
         .collect();
+    // No air sensor: the floor probes stand in, and say so.
+    let floor = air.is_empty();
+    let air: Vec<&SeriesData> = if floor {
+        ok.iter()
+            .copied()
+            .filter(|s| is_floor_probe(&s.meta))
+            .collect()
+    } else {
+        air
+    };
+    let floor = floor && !air.is_empty();
     let mut used: Vec<u32> = air.iter().chain(&hum).map(|s| s.id).collect();
     used.sort_unstable();
     Climate {
+        floor,
         air_c: median(
             air.iter()
                 .filter_map(|s| s.latest.map(|(_, v)| v))
@@ -567,7 +591,16 @@ mod tests {
         assert_eq!(c.air_c, Some(21.0));
         assert_eq!(c.rh, Some(60.0));
         assert_eq!(c.used, vec![1, 2, 6, 8]);
-        assert_eq!(climate(&[&floor, &stuck], NOW, &cfg), Climate::default());
+        assert!(!c.floor);
+        // No air sensor: the floor probe stands in, marked as such (owner,
+        // 2026-11-14); radiators and valves never do.
+        let c = climate(&[&floor, &stuck], NOW, &cfg);
+        assert_eq!(
+            (c.air_c, c.floor, c.used.clone()),
+            (Some(30.0), true, vec![3])
+        );
+        let radiator = lox(9, t, "Heizkörper Temperatur", &[(NOW - H, 45.0)]);
+        assert_eq!(climate(&[&radiator, &stuck], NOW, &cfg), Climate::default());
     }
 
     fn kinds(w: &[Warning]) -> Vec<(Kind, String)> {

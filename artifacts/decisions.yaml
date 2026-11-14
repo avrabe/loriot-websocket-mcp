@@ -705,3 +705,33 @@ artifacts:
         target: REQ-UI-014
       - type: satisfies
         target: REQ-UI-012
+
+  - id: DD-024
+    type: design-decision
+    title: A floor probe stands in for a room without an air sensor
+    status: implemented
+    release: v0.5.0
+    description: >
+      warn::climate falls back to the room's floor-heating probes when it
+      has no air sensor, and marks the value as from the floor.
+    fields:
+      decision: >
+        When no followed, fresh, not-stuck air sensor is left in a room, the
+        room's floor probes (names with Fußboden, Fussboden, FBH or Floor)
+        give its temperature, median as usual, and Climate.floor is set;
+        the house view says "floor" on the label and "(floor probe)" in the
+        info box. Radiator probes and valve actuators never stand in. The
+        warning rules are unchanged: a floor probe raises no too-cold or
+        too-warm alarm.
+      rationale: >
+        Owner, 2026-11-14, about the study: its only temperature is the
+        floor-heating probe, which sits close to the room's air, so its value
+        is better than a grey room. Marking it keeps the difference visible.
+      alternatives: >
+        Keeping such rooms grey (the owner found that unhelpful); following
+        the room controller's actual temperature (fed from the same probe
+        there); treating floor probes as air everywhere (wrong where the
+        room has a real air sensor).
+    links:
+      - type: satisfies
+        target: REQ-UI-006
