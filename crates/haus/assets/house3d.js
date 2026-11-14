@@ -23,6 +23,7 @@ try { data = await load(); } catch (e) {
 const M = data.model;
 const el = $('view');
 const size = () => [el.clientWidth || 300, el.clientHeight || 300];
+const small = () => matchMedia('(max-width: 700px), (max-height: 600px)').matches;
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(dark ? 0x15130f : 0xf6f3ee);
@@ -30,11 +31,17 @@ let [W, H] = size();
 const camera = new THREE.PerspectiveCamera(40, W / H, 0.1, 2000);
 // Portrait (a phone): keep the horizontal angle of a square view, so the
 // house is not cut off at the sides; landscape keeps the 40° vertical angle.
+// cover: pixels hidden by the info box, at the right (wide screens) or at
+// the bottom (small ones). The picture is then the part of a frame that
+// much larger, so the camera's target sits in the middle of the free area.
+let cover = { x: 0, y: 0 };
 function fitCamera() {
-  camera.aspect = W / H;
+  const fw = W + cover.x, fh = H + cover.y;
+  camera.aspect = fw / fh;
   camera.fov = camera.aspect < 1
     ? 2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(20)) / camera.aspect) * 180 / Math.PI
     : 40;
+  if (cover.x || cover.y) camera.setViewOffset(fw, fh, cover.x, cover.y, W, H); else camera.clearViewOffset();
   camera.updateProjectionMatrix();
 }
 fitCamera();
@@ -320,10 +327,15 @@ function showRoom(r) {
   let h = `<b>${esc(r.name)}</b> <span class="dim">${esc(levelById[r.level].name)}</span>`;
   if (v) {
     for (const w of v.warnings) h += `<p class="warn">${esc(w.message)}</p>`;
-    if (v.series.length) h += '<table>' + v.series.map(s =>
+    const sum = [v.air_c != null ? fmt(v.air_c, 1) + ' °C' : null, v.rh != null ? fmt(v.rh, 0) + ' %' : null].filter(Boolean);
+    if (sum.length) h += `<p class="sum">${esc(sum.join(' · '))}</p>`;
+    // The sensor list folds away during the tour and on small screens, so
+    // the box does not cover the house; a tap opens it.
+    const open = !touring && !small() ? ' open' : '';
+    if (v.series.length) h += `<details${open}><summary>Sensors (${v.series.length})</summary>` + '<table>' + v.series.map(s =>
       `<tr${s.stale ? ' class="stale"' : ''}><td><a href="sensor/${s.id}" title="${esc(s.name)}">${esc(s.label)}</a>${s.used || !['Temperature', 'Humidity'].includes(s.quantity) ? '' : ' <span class="dim">(not counted)</span>'}</td>` +
       `<td class="v">${s.value == null ? '–' : esc(fmt(s.value, 1) + (s.unit ? ' ' + s.unit : ''))}</td></tr>` +
-      `<tr><td class="dim" colspan="2">${esc(s.age)}</td></tr>`).join('') + '</table>';
+      `<tr><td class="dim" colspan="2">${esc(s.age)}</td></tr>`).join('') + '</table></details>';
     else h += '<p class="dim">No live sensor in this room.</p>';
   } else if (!r.note) h += '<p class="dim">No sensor mapped to this room.</p>';
   if (r.note) h += `<p class="dim">${esc(r.note)}</p>`;
@@ -472,4 +484,11 @@ const pulseOff = new THREE.Color(0x000000);
     // another temperature); its label and the alert strip are red.
     if (data.rooms[r.id]?.warnings.length) m.material.emissive.copy(m.material.color).multiplyScalar(k); else m.material.emissive.copy(pulseOff);
   }
+  // While the info box is open, centre the picture in the part of the view
+  // it does not cover.
+  const infoOpen = info.style.display === 'block';
+  const c = !infoOpen ? { x: 0, y: 0 } : small()
+    ? { x: 0, y: Math.min(info.offsetHeight + 20, H * 0.6) }
+    : { x: Math.min(info.offsetWidth + 20, W * 0.5), y: 0 };
+  if (Math.abs(c.x - cover.x) > 4 || Math.abs(c.y - cover.y) > 4) { cover = c; fitCamera(); }
   controls.update(); for (const o of css) o.visible = shown(o); renderer.render(scene, camera); labels.render(scene, camera); if (frameNo++ % 6 === 0) declutter(); requestAnimationFrame(loop); })();
